@@ -1,0 +1,10 @@
+{
+  "ospId": "99a5685c-7397-402c-88de-b1b3a939ecc9",
+  "ospName": "OSP B",
+  "ospCompanyId": "33333333-3333-4333-8333-333333333333",
+  "dataspace": { "memberOf": "Catena-X", "name": "Catena-X" },
+  "masterDataFile": null,
+  "issuerMode": "CSP",
+  "ospCompanyFile": "../../testdata/osp-b-company.json",
+  "testPersonsFile": "../../testdata/persons-osp-b.json"
+}

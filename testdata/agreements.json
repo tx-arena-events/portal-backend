@@ -1,0 +1,10 @@
+{
+  "_comment": "One catalogue of terms with one identifier per version, shared by C1-M2 (agreementKey + version) and C3-M1 (agreementId). Provisional until OP-46 is decided.",
+  "agreements": [
+    { "agreementId": "aa0a0000-7fbc-1f2f-817f-bce0502c1010", "agreementKey": "terms-active-participant", "version": "1.0", "companyRoles": ["ACTIVE_PARTICIPANT"] },
+    { "agreementId": "aa0a0000-7fbc-1f2f-817f-bce0502c1013", "agreementKey": "security-regulations", "version": "1.0", "companyRoles": ["ACTIVE_PARTICIPANT"] },
+    { "agreementId": "aa0a0000-7fbc-1f2f-817f-bce0502c1011", "agreementKey": "terms-app-provider", "version": "1.0", "companyRoles": ["APP_PROVIDER"] },
+    { "agreementId": "aa0a0000-7fbc-1f2f-817f-bce0502c1017", "agreementKey": "terms-service-provider", "version": "1.0", "companyRoles": ["SERVICE_PROVIDER"] },
+    { "agreementId": "aa0a0000-7fbc-1f2f-817f-bce0502c1001", "agreementKey": "osp-terms", "version": "1.0", "companyRoles": [] }
+  ]
+}

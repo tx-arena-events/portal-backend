@@ -1,0 +1,8 @@
+{
+  "_comment": "Companies already registered at the shared CSP stand-in (core services). homeOspId refers to FRAMEWORK 7a.",
+  "companies": [
+    { "bpn": "BPNL00000000OSPA", "legalName": "OSP A Beispiel GmbH", "country": "DE", "identifiers": [ { "type": "VAT_ID", "value": "DE222222222" } ], "homeOspId": "22222222-2222-4222-8222-222222222222", "memberActive": true, "did": "did:web:wallet.example.org:BPNL00000000OSPA" },
+    { "bpn": "BPNL00000000OSPB", "legalName": "OSP B Beispiel GmbH", "country": "DE", "identifiers": [ { "type": "VAT_ID", "value": "DE333333333" } ], "homeOspId": "99a5685c-7397-402c-88de-b1b3a939ecc9", "memberActive": true, "did": "did:web:wallet.example.org:BPNL00000000OSPB" },
+    { "bpn": "BPNL00000000002B", "legalName": "Andere Beispiel AG", "country": "DE", "ebwoid": "EBWOID-DE-0000000002", "homeOspId": "99a5685c-7397-402c-88de-b1b3a939ecc9", "memberActive": true }
+  ]
+}

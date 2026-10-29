@@ -1,0 +1,29 @@
+pypi/pypi/-/annotated-doc/0.0.5, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/annotated-types/0.8.0, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/anyio/4.15.1, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/certifi/2026.10.23, MPL-2.0, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/cffi/2.1.1, MIT-0, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/click/8.5.0, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/colorama/0.4.6, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/cryptography/50.0.2, Apache-2.0 OR BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/fastapi/0.162.0, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/h11/0.16.0, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/httpcore/1.0.9, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/httpx/0.28.1, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/idna/3.20, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/iniconfig/2.3.1, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/opentelemetry-api/1.45.1, Apache-2.0, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/packaging/26.3, Apache-2.0 OR BSD-2-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pluggy/1.7.0, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pycparser/3.12, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pydantic-core/2.50.1, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pydantic/2.14.1, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pygments/2.21.0, BSD-2-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pyjwt/2.15.1, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pytest/9.2.0, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/python-multipart/0.0.32, Apache-2.0, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/pyyaml/6.0.3, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/starlette/1.10.0, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/typing-extensions/4.16.0, PSF-2.0, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/typing-inspection/0.4.4, MIT, restricted, to be checked with the Eclipse Dash license tool
+pypi/pypi/-/uvicorn/0.54.0, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool

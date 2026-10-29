@@ -1,0 +1,149 @@
+# Copyright (c) 2026 Contributors to the Eclipse Foundation
+# SPDX-License-Identifier: Apache-2.0
+"""Stand-in of C1-M2 Registration: just enough for the onboarding path (FRAMEWORK 5.2).
+
+Implemented: create an application with a verification attestation (checked against the JWKS of
+`EBW_CONNECTOR_URL`), read it, submit it with consents, the query `ApplicationInternal`, the steps
+`complete-application` and `close-application`. Everything else of the spec answers 501.
+In memory. Replace this folder with the team's module.
+"""
+from __future__ import annotations
+
+import datetime as dt
+import os
+import re
+import uuid
+
+import jwt
+from fastapi import Body
+
+from portal_common import events, http, standin
+from portal_common.problems import Problem
+from tools import testdata
+
+STANDIN = True
+MODULE = "c1-m2"
+router = standin.router(MODULE)
+applications: dict[str, dict] = {}
+
+
+def reset() -> None:
+    applications.clear()
+
+
+def _now() -> str:
+    return dt.datetime.now(dt.UTC).isoformat()
+
+
+def _verify_attestation(token: str) -> dict:
+    base = os.environ.get("EBW_CONNECTOR_URL", "").rstrip("/")
+    try:
+        keys = http.request("GET", f"{base}/jwks").json()["keys"]
+        kid = jwt.get_unverified_header(token).get("kid")
+        jwk = next(k for k in keys if k.get("kid") == kid)
+        return jwt.decode(token, jwt.PyJWK(jwk).key, algorithms=["ES256"], audience="portal-registration")
+    except Exception as e:  # noqa: BLE001 - every failure is an invalid attestation
+        raise Problem(MODULE, 400, "attestation-invalid", detail=type(e).__name__) from e
+
+
+def _address(a: dict) -> dict:
+    """Attestation address (C5-M1) -> C1-M2 Address."""
+    m = re.match(r"^(.*?)\s+(\d+\w*)$", a.get("street_address", ""))
+    street, number = (m.group(1), m.group(2)) if m else (a.get("street_address"), None)
+    return {"streetName": street, "streetNumber": number, "postalCode": a.get("postal_code"), "city": a.get("locality"),
+            "countryCode": a.get("country")}
+
+
+def _own(claims: dict, application_id: str) -> dict:
+    a = applications.get(application_id)
+    if not a or a["applicant"]["sub"] != claims["sub"]:
+        raise Problem(MODULE, 404, "not-found")
+    return a
+
+
+def _public(a: dict) -> dict:
+    return {k: v for k, v in a.items() if not k.startswith("_")}
+
+
+@router.post("/applications", status_code=201)
+def create_application(body: dict = Body(...), claims: dict = standin.perm(MODULE, "POST", "/applications")):
+    if claims.get("company_id"):
+        raise Problem(MODULE, 403, "account-bound")
+    if body.get("kind") != "ONBOARDING" or body.get("verification") != "EBW" or not body.get("attestation"):
+        raise Problem(MODULE, 400, "validation", detail="stand-in: kind ONBOARDING with verification EBW only")
+    att = _verify_attestation(body["attestation"])
+    company = att["company"]
+    given = body.get("companyData") or {}
+    identifiers = [{"type": "EBWOID", "value": company["ebwoid"], "source": "ATTESTATION"},
+                   {"type": "EUID", "value": company["euid"], "source": "ATTESTATION"}]
+    identifiers += [{**i, "source": "APPLICANT"} for i in given.get("identifiers", [])]
+    aid, cid = str(uuid.uuid4()), str(uuid.uuid4())
+    a = {"id": aid, "companyId": cid, "kind": "ONBOARDING", "existingCompany": False, "verification": "EBW",
+         "applicant": {"sub": claims["sub"], "givenName": claims.get("given_name"), "familyName": claims.get("family_name")},
+         "status": "CREATED", "companyRoles": body.get("companyRoles") or ["ACTIVE_PARTICIPANT"],
+         "companyData": {"legalName": company["legal_name"], "shortName": given.get("shortName"),
+                         "address": _address(company.get("address") or {}), "identifiers": identifiers},
+         "comparison": [], "documents": [], "consents": [], "createdAt": _now(),
+         "_attestation": {"jti": att.get("jti"), "verifiedAt": att.get("verified_at"), "issuer": att.get("iss")}}
+    applications[aid] = a
+    events.publish({"eventType": "ApplicationCreated", "applicationId": aid, "companyId": cid, "kind": a["kind"],
+                    "existingCompany": False})
+    return _public(a)
+
+
+@router.get("/applications/{applicationId}")
+def get_application(applicationId: str, claims: dict = standin.perm(MODULE, "GET", "/applications/{applicationId}")):
+    return _public(_own(claims, applicationId))
+
+
+@router.post("/applications/{applicationId}/submit")
+def submit(applicationId: str, body: dict = Body(...),
+           claims: dict = standin.perm(MODULE, "POST", "/applications/{applicationId}/submit")):
+    a = _own(claims, applicationId)
+    if a["status"] != "CREATED":
+        raise Problem(MODULE, 409, "invalid-state")
+    given = {(c.get("agreementKey"), c.get("version")) for c in body.get("consents") or []}
+    required = [x for x in testdata.agreements_for_roles(a["companyRoles"])]
+    missing = [x["agreementKey"] for x in required if (x["agreementKey"], x["version"]) not in given]
+    if missing:
+        raise Problem(MODULE, 400, "consent-missing", missing=missing)
+    a["consents"] = [{**c, "givenAt": _now()} for c in body["consents"]]
+    a["status"] = "SUBMITTED"
+    events.publish({"eventType": "ApplicationSubmitted", "applicationId": a["id"], "companyId": a["companyId"],
+                    "kind": a["kind"], "existingCompany": a["existingCompany"], "applicantSub": a["applicant"]["sub"]})
+    return _public(a)
+
+
+@router.get("/internal/applications/{applicationId}")
+def internal_application(applicationId: str,
+                         _: dict = standin.perm(MODULE, "GET", "/internal/applications/{applicationId}")):
+    a = applications.get(applicationId)
+    if not a:
+        raise Problem(MODULE, 404, "not-found")
+    required = [{"agreementKey": x["agreementKey"], "version": x["version"]}
+                for x in testdata.agreements_for_roles(a["companyRoles"])] if a["status"] != "CREATED" else []
+    return _public(a) | {"attestation": a["_attestation"], "requiredAgreements": required}
+
+
+def _step_application(body: dict) -> dict:
+    a = applications.get(body.get("applicationId"))
+    if not a:
+        raise Problem(MODULE, 404, "not-found", retryable=False)
+    return a
+
+
+@router.post("/steps/complete-application")
+def complete(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/complete-application")):
+    a = _step_application(body)
+    if a["status"] != "COMPLETED":
+        a["status"] = "COMPLETED"
+        events.publish({"eventType": "ApplicationCompleted", "applicationId": a["id"], "companyId": a["companyId"],
+                        "kind": a["kind"]})
+    return standin.step_reply(body, {"applicationId": a["id"], "status": a["status"]})
+
+
+@router.post("/steps/close-application")
+def close(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/close-application")):
+    a = _step_application(body)
+    a["status"] = "DECLINED"
+    return standin.step_reply(body, {"applicationId": a["id"], "status": a["status"]})

@@ -1,0 +1,10 @@
+{
+  "_comment": "Test persons of OSP A, each in exactly one state at start. IDs as in C2-M5 14.2 where they exist.",
+  "persons": [
+    { "key": "erika", "id": "5a1c0001-0000-4000-8000-000000000001", "givenName": "Erika", "familyName": "Mustermann", "portalRoles": [], "state": "applicant without company; onboards Beispiel Maschinenbau GmbH in scenario 1" },
+    { "key": "lieschen", "id": "5a1c0004-0000-4000-8000-000000000004", "givenName": "Lieschen", "familyName": "Müller", "portalRoles": [], "state": "without company, only Applicant (403 cases)" },
+    { "key": "otto", "id": "5a1c0012-0000-4000-8000-000000000012", "givenName": "Otto", "familyName": "Normalverbraucher", "portalRoles": ["OSP Admin"], "state": "OSP staff" },
+    { "key": "rolf", "id": "bbede0f3-fbc4-433b-b7ca-1982e8724912", "givenName": "Rolf", "familyName": "Prüfer", "portalRoles": ["OSP Reviewer"], "state": "OSP staff" },
+    { "key": "pia", "id": "5a1c0021-0000-4000-8000-000000000021", "givenName": "Pia", "familyName": "Provider", "portalRoles": ["Company Admin"], "companyId": "11111111-1111-4111-8111-111111111111", "bpn": "BPNL00000000OSPA", "state": "Company Admin of the OSP company (app provider in scenario 3)" }
+  ]
+}

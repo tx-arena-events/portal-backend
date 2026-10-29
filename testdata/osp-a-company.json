@@ -1,0 +1,8 @@
+{
+  "companyId": "11111111-1111-4111-8111-111111111111",
+  "name": "OSP A Beispiel GmbH",
+  "bpn": "BPNL00000000OSPA",
+  "address": { "street": "Am Prüfstand", "houseNumber": "1", "postalCode": "70569", "city": "Stuttgart", "countryCode": "DE" },
+  "identifiers": [ { "type": "VAT_ID", "value": "DE222222222" } ],
+  "companyRoles": [ "ONBOARDING_SERVICE_PROVIDER", "ACTIVE_PARTICIPANT", "APP_PROVIDER", "SERVICE_PROVIDER" ]
+}

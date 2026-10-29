@@ -1,0 +1,8 @@
+{
+  "companyId": "33333333-3333-4333-8333-333333333333",
+  "name": "OSP B Beispiel GmbH",
+  "bpn": "BPNL00000000OSPB",
+  "address": { "street": "Am Hafen", "houseNumber": "2", "postalCode": "20457", "city": "Hamburg", "countryCode": "DE" },
+  "identifiers": [ { "type": "VAT_ID", "value": "DE333333333" } ],
+  "companyRoles": [ "ONBOARDING_SERVICE_PROVIDER", "ACTIVE_PARTICIPANT", "APP_PROVIDER", "SERVICE_PROVIDER" ]
+}
