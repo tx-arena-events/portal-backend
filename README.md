@@ -67,6 +67,10 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 - **Events:** `events.publish()` puts the event into the outbox and returns at once; a relay
   thread delivers it. A failing subscriber does not stop the others. Events with secret fields
   are refused.
+- **Live updates for the UI** (Server-Sent Events, C11-M1 7.6, C12-M1 7.6): `sse.Broker` per
+  module with a replay buffer in memory (`SSE_REPLAY_SIZE`), `sse.response(...)` for the
+  `text/event-stream` answer: `Last-Event-ID`, heartbeat (`SSE_HEARTBEAT_SECONDS`), end at token
+  expiry. Token in the `Authorization` header only; the server part of the UI opens the stream.
 - **Neighbour addresses** (FRAMEWORK 4.7), one notation: `<MODULE>_URL` (e.g. `C3_M1_URL`), else
   `MODULE_URLS` (JSON), else `MODULE_URLS_DEFAULT` (the scaffold sets `in-process`). `in-process`
   calls the interface function of the module directly, an HTTP URL calls over HTTP with the
@@ -162,6 +166,16 @@ source (README 6.2; `FLOWS_CHECK=warn` turns the last two into warnings). Lookup
 6.8 (operationId, field paths, object mappings, `join`); a failed lookup is an error of the step.
 With an empty module address, the built-in stand-in answers with the results of README 11.3.
 Processes are kept in memory.
+
+Live state for the UI (README 7.6 to 7.8): `GET /api/c12-m1/processes/{processId}/events` for OSP
+staff and `GET /api/c12-m1/applications/{applicationId}/events` for the applicant, event
+`process-changed` with the full state of the process. The stand-in of C11-M1 streams its inbox at
+`GET /api/c11-m1/notifications/events`. Try it:
+
+```bash
+TOKEN=$(curl -s localhost:8000/auth/realms/CX-Central/test/tokens/erika | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+curl -N -H "Authorization: Bearer $TOKEN" localhost:8000/api/c11-m1/notifications/events
+```
 
 ## Provisional readings of the spec
 

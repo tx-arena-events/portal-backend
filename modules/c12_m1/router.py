@@ -1,11 +1,13 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
 """C12-M1 Process Orchestration API (openapi.yaml, README 7 and 9). Provided module, not a stand-in."""
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Header, Query, Request
 from fastapi.responses import JSONResponse
 
+from portal_common import sse
 from portal_common.problems import Problem, route_class
 from portal_common.tokens import require_spec
 
@@ -99,6 +101,49 @@ def retrigger(processId: str, stepKey: str,
     if sr is None:
         raise Problem(MODULE, 409, "invalid-state", detail="step is not FAILED")
     return JSONResponse(step_run(sr), status_code=202)
+
+
+LastEventId = Annotated[str | None, Header(alias="Last-Event-ID")]
+
+
+@router.get("/processes/{processId}/events")
+def process_events(processId: str, request: Request,
+                   claims: Annotated[dict, _perm("GET", "/processes/{processId}/events")],
+                   last_event_id: LastEventId = None):
+    """README 7.7: live changes of one process for OSP staff (Server-Sent Events, 7.6)."""
+    _process(processId)
+
+    def current():
+        with eng.get_engine().lock:
+            proc = eng.get_engine().processes.get(processId)   # gone after a reset of the installation
+            return [("process-changed", eng.process_changed(proc))] if proc else []
+
+    return sse.response(eng.BROKER, request, claims, last_event_id,
+                        visible=lambda meta: meta["processId"] == processId, initial=current)
+
+
+@router.get("/applications/{applicationId}/events")
+def application_events(applicationId: str, request: Request,
+                       claims: Annotated[dict, _perm("GET", "/applications/{applicationId}/events")],
+                       last_event_id: LastEventId = None):
+    """README 7.8: the applicant follows the processes of their own application; another person's
+    application gives an empty stream, never a 404."""
+    try:
+        uuid.UUID(applicationId)
+    except ValueError:
+        raise Problem(MODULE, 400, "validation", detail="applicationId") from None
+    sub = claims["sub"]
+
+    def visible(meta: dict) -> bool:
+        return (meta["subjectType"] == "APPLICATION" and meta["subjectId"] == applicationId
+                and meta["applicantSub"] == sub)
+
+    def current():
+        with eng.get_engine().lock:
+            procs = sorted(eng.get_engine().processes.values(), key=lambda p: p["createdAt"])
+            return [("process-changed", eng.process_changed(p)) for p in procs if visible(eng.stream_meta(p))]
+
+    return sse.response(eng.BROKER, request, claims, last_event_id, visible=visible, initial=current)
 
 
 @router.get("/flows", dependencies=[_perm("GET", "/flows")])

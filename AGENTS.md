@@ -31,6 +31,7 @@ variable names, own test data and silent errors. The rules below prevent this.
      unhandled errors 500 as Problem Details).
    - `settings`: installation settings (FRAMEWORK 4.8), for example `settings.get("ospCompanyId")`.
    - `events`: `events.publish(event)`.
+   - `sse`: Server-Sent Events for the UI, `sse.Broker()` and `sse.response(...)` (paths ending in `/events`).
    - `neighbours`: `neighbours.query(caller, target, function, **params)` calls a neighbour's
      interface function in-process or over HTTP with service token, with the shared error rule.
    - `standin`: `standin.router(module)`, `standin.perm(...)`, `standin.step_reply(...)`.

@@ -28,7 +28,7 @@ import yaml
 
 from fastapi.encoders import jsonable_encoder
 
-from portal_common import events, http, neighbours, problems, spec, standin, tokens
+from portal_common import events, http, neighbours, problems, spec, sse, standin, tokens
 
 MODULE = "c12-m1"
 log = logging.getLogger("c12-m1")
@@ -36,6 +36,7 @@ ENVELOPE = {"eventId", "eventType", "occurredAt"}
 OPEN = {"RUNNING", "WAITING", "FAILED"}
 FINAL_STEP = {"DONE", "SKIPPED"}
 LOOKUP_FAILED = "urn:c12-m1:problem:lookup-failed"
+BROKER = sse.Broker()   # stream events `process-changed` for the UI (README 7.6)
 
 
 class FlowError(Exception):
@@ -216,6 +217,7 @@ class Engine:
         self.processed_events: set[str] = set()
         self.audit: list[dict] = []
         self.call_log: list[tuple[str, dict]] = []
+        self.streamed: dict[str, tuple] = {}   # processId -> last state sent to the UI (README 7.6)
 
     # ---------------------------------------------------------------- events (README 6.5)
     def on_event(self, event: dict) -> None:
@@ -238,6 +240,7 @@ class Engine:
                     touched.append(self._start(fl, event))
             for proc in touched:
                 self.advance(proc)
+                self._changed(proc)
 
     @staticmethod
     def _decision_open(proc: dict) -> bool:
@@ -293,6 +296,7 @@ class Engine:
                 sr["state"] = "SKIPPED"
         proc["status"], proc["endReason"] = "ENDED", reason
         proc["finishedAt"] = proc["updatedAt"] = self.clock()
+        self._changed(proc)
         self._publish("ProcessEnded", proc)
 
     # ---------------------------------------------------------------- progress (README 6.3, 6.4)
@@ -320,6 +324,7 @@ class Engine:
                     if not when_ok:
                         sr["state"], sr["finishedAt"] = "SKIPPED", self.clock()
                         continue
+                    proc["status"] = "RUNNING"   # README 6.4: a step is IN_PROGRESS (shown in the stream, 7.6)
                     self._call(proc, st, sr)
                     if proc["status"] == "ENDED":   # endOn during the call (README 6.3)
                         if sr["state"] not in FINAL_STEP:
@@ -334,10 +339,22 @@ class Engine:
                 return self._set_status(proc, "RUNNING")
             proc["status"] = "COMPLETED"
             proc["finishedAt"] = proc["updatedAt"] = self.clock()
+            self._changed(proc)
             self._publish("ProcessCompleted", proc)
 
     def _set_status(self, proc: dict, status: str) -> None:
         proc["status"], proc["updatedAt"] = status, self.clock()
+        self._changed(proc)
+
+    def _changed(self, proc: dict) -> None:
+        """README 7.6: `process-changed` after every stored change of the process status or of a
+        step state; states passed within one call are combined. `meta` decides who sees it."""
+        data = process_changed(proc)
+        state = (data["status"], data["endReason"], tuple((s["stepKey"], s["state"]) for s in data["steps"]))
+        if self.streamed.get(proc["id"]) == state:
+            return
+        self.streamed[proc["id"]] = state
+        BROKER.publish("process-changed", data, stream_meta(proc))
 
     def _take_event(self, proc: dict, types: set[str]) -> dict | None:
         for e in proc["inbox"]:
@@ -462,6 +479,7 @@ class Engine:
         else:
             sr["state"], sr["finishedAt"], sr["result"] = "DONE", self.clock(), outcome.get("result") or {}
             self._take_event(proc, _completion_types(st))   # a module may also publish the event
+        self._changed(proc)
 
     def _error(self, proc: dict, sr: dict, err: dict) -> None:
         sr["attempts"] += 1
@@ -557,6 +575,7 @@ class Engine:
             for proc in list(self.processes.values()):
                 if proc["status"] == "RUNNING":
                     self.advance(proc)
+                    self._changed(proc)
 
     def retrigger(self, proc: dict, step_key: str, sub: str, comment: str | None = None) -> dict | None:
         with self.lock:
@@ -571,6 +590,7 @@ class Engine:
             self._publish("ProcessStepRetriggered", proc, stepKey=step_key, retriggeredBy=sub)
             result = dict(sr)
             self.advance(proc)
+            self._changed(proc)
             return result
 
 
@@ -587,6 +607,22 @@ def summary(p: dict) -> dict:
             "createdAt": _iso(p["createdAt"]), "updatedAt": _iso(p["updatedAt"]), "finishedAt": _iso(p["finishedAt"])}
 
 
+def process_changed(p: dict) -> dict:
+    """`data` of the stream event `process-changed` (README 7.6, `ProcessChanged`): IDs, keys and
+    states only; no variables, results or errors."""
+    s = summary(p)
+    return {"processId": p["id"], "flowKey": p["flowKey"], "subjectType": p["subjectType"],
+            "subjectId": p["subjectId"], "status": p["status"], "currentStep": s["currentStep"],
+            "endReason": p["endReason"], "steps": [{"stepKey": r["stepKey"], "state": r["state"]} for r in p["steps"]],
+            "updatedAt": s["updatedAt"]}
+
+
+def stream_meta(p: dict) -> dict:
+    """Who may see the stream events of a process (README 7.7, 7.8); never sent to the UI."""
+    return {"processId": p["id"], "subjectType": p["subjectType"], "subjectId": p["subjectId"],
+            "applicantSub": p["variables"].get("applicantSub")}
+
+
 def get_engine() -> Engine:
     global _engine
     if _engine is None:
@@ -596,6 +632,7 @@ def get_engine() -> Engine:
 
 def reset() -> Engine:
     global _engine
+    BROKER.reset()
     _engine = Engine()
     return _engine
 
