@@ -3,6 +3,7 @@
 """Module registry: one folder per module of the spec, `modules/<module id with _>/`.
 
 Contract of a module folder (a team replaces only its folder):
+- `interface.py` with a function for every step and query of the spec (README, module structure);
 - `router.py` with `router` (an `APIRouter` under the base path of the spec) and `reset()`;
 - optional in `router.py`: `on_event(event)` (subscriber of the event relay), `on_startup()`;
 - `STANDIN = True` marks the stand-in, `PROVIDED = True` a provided module (C12-M1); a team's

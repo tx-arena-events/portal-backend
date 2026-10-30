@@ -5,22 +5,20 @@ through C3-M2 `find-companies`, approve and decline by OSP staff. In memory.
 """
 from __future__ import annotations
 
-import datetime as dt
-import uuid
-
 from fastapi import Body
 
-from portal_common import events, neighbours, standin
+from portal_common import events, standin
 from portal_common.problems import Problem
 
+from . import interface
+from .interface import MODULE, cases
+
 STANDIN = True
-MODULE = "c1-m3"
 router = standin.router(MODULE)
-cases: dict[str, dict] = {}
 
 
 def reset() -> None:
-    cases.clear()
+    interface.reset()
 
 
 def _case(case_id: str) -> dict:
@@ -31,34 +29,12 @@ def _case(case_id: str) -> dict:
 
 @router.post("/steps/open-review")
 def open_review(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/open-review")):
-    aid = body.get("applicationId")
-    case = next((c for c in cases.values() if c["applicationId"] == aid), None)
-    if case is None:
-        app = neighbours.get_json(MODULE, "c1-m2", f"/internal/applications/{aid}")
-        if app is None:
-            raise Problem(MODULE, 404, "not-found", detail="application unknown", retryable=False)
-        ids = {i["type"]: i["value"] for i in app["companyData"]["identifiers"]}
-        found = neighbours.get_json(MODULE, "c3-m2", "/internal/find-companies",
-                                    params={"ebwoid": ids.get("EBWOID"), "euid": ids.get("EUID")}) or []
-        found = found.get("items", []) if isinstance(found, dict) else found
-        case = {"id": str(uuid.uuid4()), "applicationId": aid, "companyId": app["companyId"], "kind": app["kind"],
-                "existingCompany": app["existingCompany"], "applicantSub": app["applicant"]["sub"], "status": "OPEN",
-                "legalName": app["companyData"]["legalName"],
-                "checks": [{"checkKey": "DUPLICATE_AT_CSP", "result": "FAILED" if found else "PASSED",
-                            "details": [f["bpn"] for f in found]}],
-                "openedAt": dt.datetime.now(dt.UTC).isoformat()}
-        cases[case["id"]] = case
-    return standin.step_reply(body, {"reviewCaseId": case["id"]})
+    return interface.open_review(body)
 
 
 @router.post("/steps/close-review")
 def close_review(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/close-review")):
-    case = next((c for c in cases.values() if c["applicationId"] == body.get("applicationId")), None)
-    if case and case["status"] == "APPROVED":
-        raise Problem(MODULE, 409, "invalid-state", retryable=False)
-    if case:
-        case["status"] = "CLOSED"
-    return standin.step_reply(body)
+    return interface.close_review(body)
 
 
 @router.get("/review-cases")

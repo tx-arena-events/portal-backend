@@ -14,99 +14,25 @@ Route as in C4-M1 6.3, from `ISSUER_MODE` (`module-config.json` of the installat
 """
 from __future__ import annotations
 
-import os
-
 from fastapi import Body
 
-from portal_common import csp, events, http, neighbours, settings, standin
+from portal_common import events, standin
 from portal_common.problems import Problem
 
+from . import interface
+from .interface import MODULE, all_issued, credentials
+
 STANDIN = True
-MODULE = "c4-m1"
 router = standin.router(MODULE)
-TYPES = ("BPN", "MEMBERSHIP")
-credentials: dict[str, dict[str, dict]] = {}   # companyId -> type -> credential
 
 
 def reset() -> None:
-    credentials.clear()
-
-
-def _route(cid: str) -> tuple[str, dict | None]:
-    """C4-M1 6.3; returns the route and, for `CSP_ISSUER`, the wallet."""
-    if os.environ.get("ISSUER_MODE", "OWN") != "CSP":
-        if os.environ.get("ISSUER_ROUTES"):
-            raise Problem(MODULE, 409, "no-issuer-route", detail="stand-in: only the routes STUB and CSP_ISSUER",
-                          retryable=False)
-        return "STUB", None
-    if not os.environ.get("CSP_ISSUER_URL"):
-        return "STUB", None
-    wallet = neighbours.get_json(MODULE, "c4-m2", f"/internal/wallets/{cid}")
-    if not wallet:
-        raise Problem(MODULE, 409, "invalid-state", detail="no dataspace wallet", retryable=False)
-    if wallet.get("provider") == "STUB":
-        return "STUB", None
-    if wallet.get("issuanceMode") != "HOLDER_REQUESTS":
-        raise Problem(MODULE, 409, "no-issuer-route", retryable=False)
-    return "CSP_ISSUER", wallet
-
-
-def _all_issued(cid: str) -> None:
-    creds = credentials.get(cid, {})
-    if creds and all(c["status"] == "ISSUED" for c in creds.values()):
-        events.publish({"eventType": "CredentialsIssued", "companyId": cid, "credentialTypes": sorted(creds)})
-
-
-def _csp(method: str, path: str, body: dict) -> None:
-    try:
-        status, answer = csp.request(os.environ["CSP_ISSUER_URL"], method, path, body)
-    except csp.CspUnavailable as e:
-        raise Problem(MODULE, 502, "upstream-error", detail=str(e), retryable=True) from e
-    if status >= 500 or status == 401:
-        raise Problem(MODULE, 502, "upstream-error", detail=f"CSP issuer answered {status}", retryable=True)
-    if status >= 400:
-        raise Problem(MODULE, 409, "issuer-rejected", detail=f"CSP issuer answered {status}",
-                      issuerType=(answer or {}).get("type"), retryable=False)
+    interface.reset()
 
 
 @router.post("/steps/issue-credentials")
 def issue(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/issue-credentials")):
-    cid = body.get("companyId")
-    company = neighbours.get_json(MODULE, "c3-m1", f"/internal/companies/{cid}")
-    if not company or not company.get("bpn"):
-        raise Problem(MODULE, 409, "invalid-state", detail="company without BPN", retryable=False)
-    bpn = company["bpn"]
-    creds = credentials.setdefault(cid, {})
-    if creds and all(c["status"] == "ISSUED" for c in creds.values()):
-        return standin.step_reply(body, {"credentialTypes": sorted(creds)})
-    route, wallet = _route(cid)
-    if route == "STUB":
-        for t in TYPES:
-            creds[t] = {"credentialType": t, "status": "ISSUED", "bpn": bpn, "route": "STUB"}
-        _all_issued(cid)
-        return standin.step_reply(body, state="RUNNING")
-    access = neighbours.get_json(MODULE, "c4-m2", f"/internal/wallets/{cid}/holder-access")
-    if not access:
-        raise Problem(MODULE, 409, "invalid-state", detail="no holder access", retryable=False)
-    for t in TYPES:
-        creds[t] = {"credentialType": t, "status": "PENDING", "bpn": bpn, "route": "CSP_ISSUER"}
-    _csp("PUT", f"/holders/{bpn}", {"did": wallet["did"]})
-    base = settings.base_url()
-    for t in TYPES:
-        kind = t.lower()
-        grant = {"callbackUrl": f"{base}/api/c4-m1/issuer-callbacks/{kind}"}
-        if kind == "membership":
-            grant["memberOf"] = settings.get("dataspace", {}).get("memberOf")
-        _csp("PUT", f"/holders/{bpn}/grants/{kind}", grant)
-    r = http.request("POST", f"{access['identityApiUrl']}/participants/{access['participantContextId']}/credentials/request",
-                     json={"issuerDid": os.environ.get("CSP_ISSUER_DID", "did:web:issuer.csp.example.org"),
-                           "holderPid": f"{cid}:onboarding:{body.get('stepRunId')}",
-                           "credentials": [{"type": t.lower()} for t in TYPES]},
-                     headers={"x-api-key": access["apiKey"]})
-    if not r.is_success:
-        raise Problem(MODULE, 502, "upstream-error", detail=f"wallet identity API answered {r.status_code}",
-                      retryable=r.status_code >= 500)
-    return standin.step_reply(body, state="RUNNING")   # completed by CredentialsIssued
+    return interface.issue_credentials(body)
 
 
 @router.post("/issuer-callbacks/{credentialKind}")
@@ -120,7 +46,7 @@ def issuer_callback(credentialKind: str, body: dict = Body(...),
     if cred["status"] == "PENDING":
         if body.get("status") == "SUCCESSFUL":
             cred["status"] = "ISSUED"
-            _all_issued(cid)
+            all_issued(cid)
         else:
             cred["status"] = "FAILED"
             events.publish({"eventType": "CredentialIssuanceFailed", "companyId": cid, "credentialType": t})
@@ -130,10 +56,10 @@ def issuer_callback(credentialKind: str, body: dict = Body(...),
 @router.get("/internal/companies/{companyId}/credentials")
 def query_credentials(companyId: str,
                       _: dict = standin.perm(MODULE, "GET", "/internal/companies/{companyId}/credentials")):
-    return {"companyId": companyId, "credentials": list(credentials.get(companyId, {}).values())}
+    return interface.query_company_credentials(companyId=companyId)
 
 
 @router.get("/companies/{companyId}/credentials")
 def own_credentials(companyId: str, claims: dict = standin.perm(MODULE, "GET", "/companies/{companyId}/credentials")):
     standin.company_scope(MODULE, claims, companyId)
-    return {"companyId": companyId, "credentials": list(credentials.get(companyId, {}).values())}
+    return interface.query_company_credentials(companyId=companyId)

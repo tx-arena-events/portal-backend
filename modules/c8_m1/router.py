@@ -13,15 +13,16 @@ from fastapi import Body
 from portal_common import events, neighbours, standin
 from portal_common.problems import Problem
 
+from . import interface
+from .interface import MODULE, offers
+
 STANDIN = True
-MODULE = "c8-m1"
 router = standin.router(MODULE)
-offers: dict[str, dict] = {}
 ROLE_FOR = {"APP": "APP_PROVIDER", "SERVICE": "SERVICE_PROVIDER"}
 
 
 def reset() -> None:
-    offers.clear()
+    interface.reset()
 
 
 def _own(claims: dict, offer_id: str) -> dict:
@@ -35,7 +36,7 @@ def create(body: dict = Body(...), claims: dict = standin.perm(MODULE, "POST", "
     cid, kind = claims.get("company_id"), body.get("offerType")
     if kind not in ROLE_FOR or not body.get("name"):
         raise Problem(MODULE, 400, "validation", detail="offerType APP or SERVICE and name")
-    company = neighbours.get_json(MODULE, "c3-m1", f"/internal/companies/{cid}") if cid else None
+    company = neighbours.query(MODULE, "c3-m1", "query_company", companyId=cid) if cid else None
     if not company or ROLE_FOR[kind] not in company.get("companyRoles", []):
         raise Problem(MODULE, 403, "company-role-missing", detail=f"company role {ROLE_FOR[kind]} missing")
     o = {"offerId": str(uuid.uuid4()), "status": "DRAFT", "offerType": kind, "name": body["name"],
@@ -88,10 +89,7 @@ def approve(offerId: str, _: dict = standin.perm(MODULE, "POST", "/osp/offers/{o
 
 @router.get("/internal/offers/{offerId}")
 def internal_offer(offerId: str, _: dict = standin.perm(MODULE, "GET", "/internal/offers/{offerId}")):
-    o = offers.get(offerId)
-    if not o:
-        raise Problem(MODULE, 404, "not-found")
-    return o | {"hasTechnicalUserProfile": o["technicalUserProfile"] is not None}
+    return interface.get_offer_internal(offerId=offerId)
 
 
 @router.get("/offers/{offerId}")

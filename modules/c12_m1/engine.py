@@ -2,11 +2,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """C12-M1 Process Orchestration: runs the flows of `flows.yaml` (README sections 4 to 6, 11).
 
-In memory (no database yet). Events arrive from the event relay of the installation; steps are
-called over HTTP or in-process (`portal_common.neighbours.address`), with the service token of
-`svc-c12-m1`. With an empty module address the built-in stand-in answers (README 11.3):
-steps `DONE` at once with the stand-in results, lookups with the answers of section 14
-(`STANDIN_FILE` replaces both). Lookups follow README 6.8: `query` = `<module>.<operationId>`,
+In memory (no database yet). Events arrive from the event relay of the installation. A step
+`<module>.<step>` of flows.yaml is called in-process as `modules.<module>.interface.<step in
+snake_case>(input)` and a lookup `<module>.<operationId>` as `<operationId in snake_case>(**params)`
+(README 4); a module with an HTTP address is called over HTTP with the service token of
+`svc-c12-m1`. With an empty module address the built-in stand-in answers (README 11.3): steps
+`DONE` at once with the stand-in results, lookups with the answers of section 14 (`STANDIN_FILE`
+replaces both). Lookups follow README 6.8: `query` = `<module>.<operationId>`,
 field paths, object mappings and `join`; a failed lookup is an error of the step, never
 `found: false`. In memory: a restart loses the processes (upgrade: tables of README 5).
 """
@@ -24,7 +26,9 @@ from pathlib import Path
 import httpx
 import yaml
 
-from portal_common import events, http, neighbours, spec, standin, tokens
+from fastapi.encoders import jsonable_encoder
+
+from portal_common import events, http, neighbours, problems, spec, standin, tokens
 
 MODULE = "c12-m1"
 log = logging.getLogger("c12-m1")
@@ -378,19 +382,22 @@ class Engine:
         lk = self.lookups[name]
         op = lookup_operation(lk["query"])
         params = {p: self.resolve(proc, src) for p, src in (lk.get("params") or {}).items()}
-        path = op.path
-        for p in list(params):
-            if "{" + p + "}" in path:
-                path = path.replace("{" + p + "}", str(params.pop(p)))
+        path_params = {p for p in params if "{" + p + "}" in op.path}
+        if neighbours.in_process(op.module):
+            return self._lookup_in_process(lk, name, op, {k: v for k, v in params.items()
+                                                          if v is not None or k in path_params})
         base = neighbours.address(op.module)
         if not base:   # built-in stand-in (README 11.3)
             raw = copy.deepcopy(self.standin["lookups"].get(lk["query"]))
             if isinstance(raw, dict):
-                raw.update({p: self.resolve(proc, src) for p, src in (lk.get("params") or {}).items()})
+                raw.update(params)
             return self._lookup_result(lk, raw)
+        path = op.path
+        for p in path_params:
+            path = path.replace("{" + p + "}", str(params[p]))
         try:
             r = http.request("GET", f"{base}{spec.module(op.module).base_path}{path}", timeout=self.timeout,
-                             params={k: v for k, v in params.items() if v is not None},
+                             params={k: v for k, v in params.items() if v is not None and k not in path_params},
                              headers={"Authorization": "Bearer " + tokens.service_token(MODULE)})
         except httpx.HTTPError as e:
             raise LookupFailed({"type": LOOKUP_FAILED, "status": None, "title": f"lookup {name}: {type(e).__name__}",
@@ -406,6 +413,20 @@ class Engine:
             raise LookupFailed({"type": body.get("type") or LOOKUP_FAILED, "status": r.status_code,
                                 "title": f"lookup {name} answered {r.status_code}", "retryable": retryable})
         return self._lookup_result(lk, r.json())
+
+    def _lookup_in_process(self, lk: dict, name: str, op: spec.Operation, params: dict) -> dict:
+        """README 6.8 in the same process: `modules.<module>.interface.<operationId in snake_case>(**params)`;
+        a Problem counts like the same answer over HTTP."""
+        try:
+            raw = jsonable_encoder(standin.interface_function(op.module, op.function_name)(**params))
+        except Exception as e:  # noqa: BLE001 - every error of a lookup is an error of the step
+            p = problems.to_problem(op.module, e, False)
+            if p.status == 404:
+                return {"found": False}
+            retryable = p.ext["retryable"] if isinstance(p.ext.get("retryable"), bool) else p.status >= 500
+            raise LookupFailed({"type": p.body()["type"], "status": p.status,
+                                "title": f"lookup {name} answered {p.status}", "retryable": retryable}) from e
+        return self._lookup_result(lk, raw)
 
     @staticmethod
     def _lookup_result(lk: dict, raw) -> dict:
@@ -461,6 +482,8 @@ class Engine:
 
     def _invoke(self, proc: dict, st: dict, data: dict) -> dict:
         module, _, step = st["call"].partition(".")
+        if neighbours.in_process(module):
+            return self._invoke_in_process(module, step, data)
         base = neighbours.address(module)
         if not base:
             return self._standin(proc, st, data)
@@ -479,6 +502,22 @@ class Engine:
         return {"error": {"type": body.get("type", f"http-{r.status_code}"), "status": r.status_code,
                           "title": body.get("title"), "detail": body.get("detail"),
                           "retryable": body.get("retryable") is True}}
+
+    @staticmethod
+    def _invoke_in_process(module: str, step: str, data: dict) -> dict:
+        """README 4: `modules.<module>.interface.<step in snake_case>(input)`; a Problem counts like
+        the same answer over HTTP (Problem Details with `retryable`)."""
+        try:
+            fn = standin.interface_function(module, spec.snake_case(step))
+            body = jsonable_encoder(fn(copy.deepcopy(data)))
+        except Exception as e:  # noqa: BLE001 - every error of a step is an outcome of the step run
+            p = problems.to_problem(module, e, True).body()
+            return {"error": {"type": p["type"], "status": p["status"], "title": p.get("title"),
+                              "detail": p.get("detail"), "retryable": p.get("retryable") is True}}
+        if isinstance(body, dict) and body.get("state") in ("DONE", "RUNNING"):
+            return body
+        return {"error": {"type": "invalid-step-answer", "status": None, "title": f"{module}.{step}: no step result",
+                          "retryable": False}}
 
     def _standin(self, proc: dict, st: dict, data: dict) -> dict:
         """README 11.3: DONE at once, no events; `set` of the first completesOn entry applies."""
@@ -538,6 +577,14 @@ class Engine:
 _engine: Engine | None = None
 _worker: threading.Thread | None = None
 _stop = threading.Event()
+
+
+def summary(p: dict) -> dict:
+    """Process summary of README 7.1 and 9."""
+    current = next((s["stepKey"] for s in p["steps"] if s["state"] not in ("DONE", "SKIPPED")), None)
+    return {"id": p["id"], "flowKey": p["flowKey"], "flowVersion": p["flowVersion"], "subjectType": p["subjectType"],
+            "subjectId": p["subjectId"], "status": p["status"], "currentStep": current, "endReason": p["endReason"],
+            "createdAt": _iso(p["createdAt"]), "updatedAt": _iso(p["updatedAt"]), "finishedAt": _iso(p["finishedAt"])}
 
 
 def get_engine() -> Engine:

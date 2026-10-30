@@ -10,11 +10,12 @@ from portal_common.problems import Problem, route_class
 from portal_common.tokens import require_spec
 
 from . import engine as eng
+from . import interface
 
 PROVIDED = True   # provided module (C12-M1 kind "Provided"), not a stand-in
 MODULE = eng.MODULE
 router = APIRouter(prefix="/api/c12-m1", route_class=route_class(MODULE), tags=["C12-M1 Process Orchestration"])
-SUBJECT_TYPES = {"APPLICATION", "COMPANY", "TECHNICAL_USER", "OFFER", "SUBSCRIPTION", "CONNECTOR"}
+SUBJECT_TYPES = interface.SUBJECT_TYPES
 STATUSES = {"RUNNING", "WAITING", "FAILED", "COMPLETED", "ENDED"}
 
 
@@ -26,11 +27,7 @@ def _iso(t):
     return t.isoformat() if t else None
 
 
-def summary(p: dict) -> dict:
-    current = next((s["stepKey"] for s in p["steps"] if s["state"] not in ("DONE", "SKIPPED")), None)
-    return {"id": p["id"], "flowKey": p["flowKey"], "flowVersion": p["flowVersion"], "subjectType": p["subjectType"],
-            "subjectId": p["subjectId"], "status": p["status"], "currentStep": current, "endReason": p["endReason"],
-            "createdAt": _iso(p["createdAt"]), "updatedAt": _iso(p["updatedAt"]), "finishedAt": _iso(p["finishedAt"])}
+summary = eng.summary
 
 
 def step_run(s: dict, detail: bool = False) -> dict:
@@ -119,8 +116,4 @@ def get_flow(flowKey: str):
 
 @router.get("/internal/processes", dependencies=[_perm("GET", "/internal/processes")])
 def internal_processes(subjectType: Annotated[str, Query()], subjectId: Annotated[str, Query()]):
-    if subjectType not in SUBJECT_TYPES:
-        raise Problem(MODULE, 400, "validation", detail="subjectType")
-    items = [summary(p) for p in list(eng.get_engine().processes.values())
-             if p["subjectType"] == subjectType and p["subjectId"] == subjectId]
-    return sorted(items, key=lambda x: x["createdAt"], reverse=True)
+    return interface.find_processes_of_subject(subjectType=subjectType, subjectId=subjectId)

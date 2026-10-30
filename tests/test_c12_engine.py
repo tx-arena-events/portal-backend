@@ -13,6 +13,7 @@ from conftest import BASE, bearer, person_token
 from modules.c12_m1 import engine as eng
 from modules.c12_m1 import router as c12_router
 from portal_common import events, problems, spec, standin, tokens
+from portal_common.problems import Problem
 from portal_common import http as phttp
 from tools import test_iam
 
@@ -312,3 +313,44 @@ def test_standin_results_follow_readme_11_3():
                                                                                           "iamClientId": "standin-r1"}
     assert standin.standin_result("c2-m3.create-for-subscription", {}) == {"accounts": []}
     assert standin.standin_result("c3-m2.transfer-company", {"bpn": "BPNL1"}) == {"bpn": "BPNL1"}
+
+
+# ---------------------------------------------------------------- in-process calls (README 4)
+def test_in_process_step_calls_the_interface_function(engine, monkeypatch):
+    from modules.c3_m1 import interface as c3_m1
+    seen = []
+
+    def create_company(input):
+        seen.append(input)
+        raise Problem("c3-m1", 409, "invalid-state", retryable=False)
+
+    monkeypatch.setenv("C3_M1_URL", "in-process")
+    monkeypatch.setattr(c3_m1, "create_company", create_company)
+    engine.on_event(submitted())
+    p = proc_of(engine, "onboarding")
+    assert seen[0]["companyId"] == COMPANY and {"processId", "stepRunId"} <= set(seen[0])
+    sr = step(p, "create-company")
+    assert p["status"] == "FAILED" and sr["lastError"]["type"] == "urn:c3-m1:problem:invalid-state"
+    assert sr["lastError"]["retryable"] is False
+    monkeypatch.setattr(c3_m1, "create_company", lambda input: {"stepRunId": input["stepRunId"], "state": "DONE",
+                                                                "result": {"companyId": COMPANY}})
+    engine.retrigger(p, "create-company", "otto")
+    assert step(p, "create-company")["state"] == "DONE"
+    assert step(p, "create-company")["result"] == {"companyId": COMPANY}
+
+
+def test_in_process_lookup_calls_the_interface_function(engine, monkeypatch):
+    from modules.c8_m1 import interface as c8_m1
+    seen = {}
+
+    def get_offer_internal(*, offerId):
+        seen["offerId"] = offerId
+        raise Problem("c8-m1", 503, "upstream-error")
+
+    monkeypatch.setenv("C8_M1_URL", "in-process")
+    monkeypatch.setattr(c8_m1, "get_offer_internal", get_offer_internal)
+    p = _offer_approved(engine)
+    sr = step(p, "create-client-template")
+    assert seen == {"offerId": "7c1d9e3a-2b4f-4a6c-8d0e-5f1a2b3c4d5e"}
+    assert sr["state"] == "READY" and sr["lastError"]["type"] == "urn:c8-m1:problem:upstream-error"
+    assert sr["lastError"]["retryable"] is True

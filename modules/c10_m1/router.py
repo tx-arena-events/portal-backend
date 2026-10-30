@@ -9,22 +9,20 @@ from __future__ import annotations
 
 import uuid
 
-import httpx
 from fastapi import Body
 
-from portal_common import events, http, neighbours, standin
+from portal_common import events, neighbours, standin
 from portal_common.problems import Problem
 
+from . import interface
+from .interface import MODULE, provider_config, subscriptions
+
 STANDIN = True
-MODULE = "c10-m1"
 router = standin.router(MODULE)
-subscriptions: dict[str, dict] = {}
-provider_config: dict[str, dict] = {}   # providerCompanyId -> configuration (with secret)
 
 
 def reset() -> None:
-    subscriptions.clear()
-    provider_config.clear()
+    interface.reset()
 
 
 def _visible(claims: dict, sid: str, provider_only: bool = False) -> dict:
@@ -42,23 +40,6 @@ def _event_fields(s: dict) -> dict:
     return {k: s[k] for k in ("offerSubscriptionId", "offerId", "offerType", "customerCompanyId", "providerCompanyId")}
 
 
-def _provider_call(provider: str, kind: str, body: dict) -> None:
-    cfg = provider_config.get(provider)
-    if not cfg:
-        raise Problem(MODULE, 409, "invalid-state", detail="provider has no configuration", retryable=False)
-    try:
-        t = http.request("POST", cfg["tokenUrl"], data={"grant_type": "client_credentials", "client_id": cfg["clientId"],
-                                                        "client_secret": cfg["clientSecret"]})
-        if t.status_code != 200:
-            raise Problem(MODULE, 502, "provider-rejected", detail=f"token {t.status_code}", retryable=t.status_code >= 500)
-        r = http.request("POST", cfg[f"{kind}Url"], json=body, headers={"Authorization": "Bearer " + t.json()["access_token"]})
-    except httpx.HTTPError as e:
-        raise Problem(MODULE, 502, "upstream-error", detail=type(e).__name__, retryable=True) from e
-    if not r.is_success:
-        raise Problem(MODULE, 502, "provider-rejected" if r.status_code < 500 else "upstream-error",
-                      detail=f"{kind} {r.status_code}", retryable=r.status_code >= 500)
-
-
 @router.put("/provider-configuration")
 def put_config(body: dict = Body(...), claims: dict = standin.perm(MODULE, "PUT", "/provider-configuration")):
     missing = [k for k in ("setupUrl", "callbackUrl", "tokenUrl", "clientId", "clientSecret") if not body.get(k)]
@@ -71,7 +52,7 @@ def put_config(body: dict = Body(...), claims: dict = standin.perm(MODULE, "PUT"
 @router.post("/subscriptions", status_code=201)
 def subscribe(body: dict = Body(...), claims: dict = standin.perm(MODULE, "POST", "/subscriptions")):
     cid = claims.get("company_id")
-    offer = neighbours.get_json(MODULE, "c8-m1", f"/internal/offers/{body.get('offerId')}")
+    offer = neighbours.query(MODULE, "c8-m1", "get_offer_internal", offerId=body.get("offerId"))
     if not offer or offer["status"] != "ACTIVE":
         raise Problem(MODULE, 409, "offer-not-active")
     if offer["providerCompanyId"] == cid:
@@ -91,19 +72,6 @@ def get_subscription(offerSubscriptionId: str,
     return s | {"setupStatus": _setup_status(s["offerSubscriptionId"])}
 
 
-@router.post("/steps/notify-provider")
-def notify_provider(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/notify-provider")):
-    s = subscriptions.get(body.get("offerSubscriptionId"))
-    if not s:
-        raise Problem(MODULE, 404, "not-found", retryable=False)
-    customer = neighbours.get_json(MODULE, "c3-m1", f"/internal/companies/{s['customerCompanyId']}") or {}
-    _provider_call(s["providerCompanyId"], "setup", {
-        "offerSubscriptionId": s["offerSubscriptionId"], "offerId": s["offerId"], "customerCompanyId": s["customerCompanyId"],
-        "customerName": customer.get("name"), "customerCountry": (customer.get("address") or {}).get("countryCode"),
-        "setupExpected": s["offerType"] == "APP"})
-    return standin.step_reply(body)
-
-
 @router.post("/subscriptions/{offerSubscriptionId}/start-setup")
 def start_setup(offerSubscriptionId: str, body: dict = Body(default={}),
                 claims: dict = standin.perm(MODULE, "POST", "/subscriptions/{offerSubscriptionId}/start-setup")):
@@ -116,8 +84,8 @@ def start_setup(offerSubscriptionId: str, body: dict = Body(default={}),
 
 
 def _setup_status(sid: str) -> str | None:
-    procs = neighbours.get_json(MODULE, "c12-m1", "/internal/processes",
-                                params={"subjectType": "SUBSCRIPTION", "subjectId": sid}) or []
+    procs = neighbours.query(MODULE, "c12-m1", "find_processes_of_subject", subjectType="SUBSCRIPTION",
+                             subjectId=sid) or []
     setup = next((p for p in procs if p["flowKey"] == "subscription-setup"), None)
     return setup["status"] if setup else None
 
@@ -138,20 +106,12 @@ def activate(offerSubscriptionId: str,
     return s
 
 
+@router.post("/steps/notify-provider")
+def notify_provider(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/notify-provider")):
+    return interface.notify_provider(body)
+
+
 @router.post("/steps/send-activation-callback")
 def send_activation_callback(body: dict = Body(...),
                              _: dict = standin.perm(MODULE, "POST", "/steps/send-activation-callback")):
-    s = subscriptions.get(body.get("offerSubscriptionId"))
-    if not s:
-        raise Problem(MODULE, 404, "not-found", retryable=False)
-    client_id = body.get("clientId")   # iamClientId of the instance client (C10-M1 8.2)
-    if s["providerCompanyId"] not in provider_config or not provider_config[s["providerCompanyId"]].get("callbackUrl"):
-        return standin.step_reply(body)    # without a callbackUrl: nothing to do
-    technical_user = None
-    for acc in body.get("technicalUsers") or []:
-        r = neighbours.call(MODULE, "c2-m3", "POST", f"/internal/technical-users/{acc['technicalUserId']}/credentials/rotate")
-        technical_user = {k: r.json()[k] for k in ("clientId", "clientSecret")}
-    _provider_call(s["providerCompanyId"], "callback", {"offerSubscriptionId": s["offerSubscriptionId"],
-                                                        "instanceUrl": s["instanceUrl"], "clientId": client_id,
-                                                        "technicalUser": technical_user})
-    return standin.step_reply(body)
+    return interface.send_activation_callback(body)

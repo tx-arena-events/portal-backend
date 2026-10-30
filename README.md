@@ -41,8 +41,8 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 
 | Folder | Content |
 |---|---|
-| `portal_common/` | shared building blocks: token validation (`tokens`), `service_token(module)`, Problem Details (`problems`), installation settings (`settings`), neighbour calls with the error rule (`neighbours`), event relay (`events`), access to the CSP with `private_key_jwt` (`csp`), spec access (`spec`), spec-driven stand-ins (`standin`) |
-| `modules/<module>/` | one folder per module of the spec; `c12_m1` is Process Orchestration (provided), all others are stand-ins |
+| `portal_common/` | shared building blocks: token validation (`tokens`), `service_token(module)`, Problem Details (`problems`), installation settings (`settings`), queries to neighbours with the error rule (`neighbours`), event relay (`events`), access to the CSP with `private_key_jwt` (`csp`), spec access (`spec`), spec-driven stand-ins (`standin`) |
+| `modules/<module>/` | one folder per module of the spec (`interface.py`, `router.py`, see [Module structure](#module-structure-and-calls-between-modules)); `c12_m1` is Process Orchestration (provided), all others are stand-ins |
 | `scaffold/` | the installation app (`create_app`) and the module registry |
 | `tools/` | test tools: Portal IAM (`test_iam`), shared CSP stand-in (`csp_standin`, own process), EBW-Connector double for attestations (`ebw_signer`), provider system double (`provider_double`), keys |
 | `config/osp-a`, `config/osp-b` | per installation: settings (`installation.json`, FRAMEWORK 4.8), configuration variables of the modules (`module-config.json`, e.g. `ATTESTATION_CLIENT_IDS`, `ISSUER_MODE`; the process environment wins), clients at the EBW-Connector (`ebw-clients.json`, C5-M1 6.8) |
@@ -57,26 +57,66 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 - **Permissions from the spec:** `tokens.require_spec(module, method, path)` takes the permission
   from `x-permission` in `openapi.yaml`. When the spec renames a permission, nothing changes in code.
 - **Service token:** `tokens.service_token("c3-m1")` returns the token of the service account
-  `svc-c3-m1` with every step and query permission of the spec. Process Orchestration uses it for
-  steps and lookups, `neighbours.call()` for queries.
+  `svc-c3-m1` with every step and query permission of the spec. Process Orchestration and
+  `neighbours.query()` use it for calls over HTTP; calls in the same process carry no token.
 - **Problem Details:** route class `problems.route_class(module)`: validation 400 (not 422),
   unhandled errors 500 as Problem Details, steps always with `retryable`.
 - **Errors of a neighbour:** 4xx -> 502 `neighbour-rejected`, `retryable: false`; 5xx, timeout,
-  no connection -> 502 `upstream-error`, `retryable: true`.
+  no connection -> 502 `upstream-error`, `retryable: true`. In the same process, the `Problem`
+  raised by the neighbour's interface function counts with its status, as over HTTP.
 - **Events:** `events.publish()` puts the event into the outbox and returns at once; a relay
   thread delivers it. A failing subscriber does not stop the others. Events with secret fields
   are refused.
 - **Neighbour addresses** (FRAMEWORK 4.7), one notation: `<MODULE>_URL` (e.g. `C3_M1_URL`), else
   `MODULE_URLS` (JSON), else `MODULE_URLS_DEFAULT` (the scaffold sets `in-process`). `in-process`
-  calls the module of the same installation through its ASGI interface, with token and checks.
+  calls the interface function of the module directly, an HTTP URL calls over HTTP with the
+  service token, empty means the built-in stand-in of the caller.
+
+## Module structure and calls between modules
+
+Binding convention for every module folder `modules/<id>/` (id like `c1_m2`):
+
+1. `interface.py` holds the public functions of the module. Other modules import only from there,
+   e.g. `from modules.c1_m2.interface import get_application_internal`; never a neighbour's router,
+   service or data.
+2. Names: a step by its step name in snake_case (`create-company` -> `create_company`), a query by
+   its operationId in snake_case (`getApplicationInternal` -> `get_application_internal`).
+3. Signatures: a step is `def create_company(input: dict) -> dict`; `input` is the JSON body of
+   `POST /steps/<step>` (with `processId`, `stepRunId`), the return value is the step result
+   `{stepRunId, state, result}` exactly as the HTTP response. A query is
+   `def get_application_internal(**params) -> dict | list`; the keyword arguments are the path and
+   query parameters by their names in `openapi.yaml`, the return value is the JSON body. No token
+   in the same process (FRAMEWORK 4.2).
+4. Errors: raise `portal_common.problems.Problem` (`type`, `status`, `retryable`). The HTTP layer
+   turns it into Problem Details; a caller in the same process receives the exception.
+5. `router.py` is a thin HTTP layer: it checks token and permission and calls the module's own
+   interface functions.
+6. Addressing (FRAMEWORK 4.7) as above: `neighbours.query(caller, target, "query_company",
+   companyId=...)` calls `modules.c3_m1.interface.query_company` for `in-process`, otherwise HTTP
+   with the service token, or raises 502 `neighbour-not-configured` when the address is empty.
+7. Process Orchestration calls a step `c3-m1.create-company` of `flows.yaml` as
+   `modules.c3_m1.interface.create_company(input)` and a lookup `c8-m1.getOfferInternal` as
+   `get_offer_internal(**params)` when the module is `in-process`, otherwise over HTTP.
+8. The stand-ins expose the same functions. `__getattr__ = standin.missing_interface(MODULE)` at
+   the end of `interface.py` adds every step and query the module does not define yet (steps answer
+   `DONE` with the stand-in results of C12-M1 11.3, queries 501), so a team replaces a stand-in
+   folder and nothing else changes.
+
+`tests/test_interfaces.py` checks that every interface has a function for every step and query
+(`/steps`, `/internal`) of its `openapi.yaml` and that modules import each other only through
+`modules.<id>.interface`.
 
 ## How a team replaces its module
 
-1. Delete the stand-in `modules/<module>/router.py` (or start from it) and write the module there.
-2. `router.py` provides `router` (an `APIRouter` under `/api/<module>`), `reset()`, optionally
-   `on_event(event)` and `on_startup()`. Keep `__init__.py` empty, no other top-level modules.
-3. Every operation of the spec that the module does not implement yet is added automatically
-   (steps answer `DONE`, everything else 501), so the installation never has a missing path.
+1. Replace the stand-in `modules/<module>/interface.py` and `router.py` (or start from them) and
+   write the module there; further files of the module (service, data) stay inside the folder.
+2. `interface.py` provides the steps and queries (see above). `router.py` provides `router` (an
+   `APIRouter` under `/api/<module>`), `reset()`, optionally `on_event(event)` and `on_startup()`.
+   Keep `__init__.py` empty.
+3. Every operation of the spec that the module does not implement yet is added automatically: a
+   step or query without a route calls the interface function (the stand-in function while the
+   module does not define it), every other operation answers 501. The installation never has a
+   missing path.
 4. Read configuration in `reset()` or at call time, never at import.
 5. `uv run pytest -q && uv run python demo.py` before every merge. `GET /scaffold/modules` shows
    which modules are stand-ins.
@@ -144,6 +184,11 @@ These points are not (yet) fixed by the spec; the scaffold decides as follows:
    `own-offer`; C8-M1 open question 5).
 7. **Stand-ins of C1-M2, C3-M1 and C3-M2** read and pass on the formats each spec defines for its
    own module; C3-M1 maps the C1-M2 application as C3-M1 11.1 describes.
+8. **Queries with a JSON body** (`POST /internal/...`, e.g. C3-M1 `findIdentifierMatches`, C2-M3
+   `rotateSubscriptionCredentials`): the call convention names only path and query parameters; the
+   scaffold passes the fields of the body as further keyword arguments.
+9. **Errors of a neighbour in the same process** follow the error rule above (point 1), as over
+   HTTP, so that a caller sees the same `Problem` whatever the address of the neighbour.
 
 ## Not included yet
 

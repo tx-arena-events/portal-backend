@@ -1,11 +1,17 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
-"""Spec-driven stand-ins.
+"""Spec-driven stand-ins and the interface functions of the modules.
 
-`fallback_router(module)` mounts every operation of the module's `openapi.yaml` that the module
-does not implement itself: the permission from `x-permission` is checked as in the real module;
-a step answers `DONE` with a stand-in result, every other operation 501 `not-implemented`.
-A team that replaces a stand-in therefore starts from a module where every path already exists.
+`interface_function(module, name)` is `modules.<module>.interface.<name>`, the in-process entry
+point of a step or query (FRAMEWORK 1). `missing_interface(module)` is the `__getattr__` of an
+`interface.py`: every step and query of the spec that the module does not define yet exists as a
+stand-in function (a step answers `DONE` with a stand-in result, a query raises 501).
+
+`fallback_router(module)` mounts every operation of the module's `openapi.yaml` that the module's
+router does not implement itself: the permission from `x-permission` is checked as in the real
+module; steps and queries call the module's interface function, every other operation answers
+501 `not-implemented`. A team that replaces a stand-in therefore starts from a module where every
+path and every interface function already exists.
 
 `standin_result()` gives the stand-in results of steps that later steps need (`bpn`, `did`, the
 ID of an instance client, ...) as C12-M1 README 11.3 lists them; Process Orchestration uses
@@ -16,11 +22,14 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib
 import re
 import uuid
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
 
 from . import spec, tokens
 from .problems import Problem, route_class
@@ -66,22 +75,79 @@ def _norm(path: str) -> str:
     return re.sub(r"\{[^/}]+\}", "{}", path)
 
 
+def _interface_operations(module: str) -> dict[str, spec.Operation]:
+    return {op.function_name: op for op in spec.module(module).operations if op.function_name}
+
+
+def _standin_function(op: spec.Operation) -> Callable:
+    """Stand-in of one interface function: a step answers DONE with the results of C12-M1 11.3,
+    a query raises 501 (the same answers as the fallback routes over HTTP)."""
+    if op.is_step:
+        call = f"{op.module}.{op.path.removeprefix('/steps/')}"
+
+        def step(input: dict) -> dict:
+            return {"stepRunId": input.get("stepRunId"), "state": "DONE", "result": standin_result(call, input)}
+        fn = step
+    else:
+        def query(**params):
+            raise Problem(op.module, 501, "not-implemented",
+                          detail=f"{op.method} {op.path} is not implemented by the stand-in of {op.module}")
+        fn = query
+    fn.__name__ = fn.__qualname__ = op.function_name
+    return fn
+
+
+def missing_interface(module: str) -> Callable[[str], Callable]:
+    """`__getattr__` for `modules/<module>/interface.py`: every step and query of the spec that the
+    module does not define yet, as a stand-in function. Delete the line once all are implemented."""
+    package = f"modules.{spec.module(module).package}.interface"
+
+    def __getattr__(name: str) -> Callable:
+        op = _interface_operations(module).get(name)
+        if op is None:
+            raise AttributeError(f"module {package!r} has no attribute {name!r}")
+        return _standin_function(op)
+
+    return __getattr__
+
+
+def interface_function(module: str, name: str) -> Callable:
+    """`modules.<module>.interface.<name>`; for a module without a folder, the stand-in function."""
+    package = f"modules.{spec.module(module).package}.interface"
+    try:
+        iface = importlib.import_module(package)
+    except ModuleNotFoundError as e:
+        if e.name not in (package, package.rsplit(".", 1)[0]):
+            raise
+        op = _interface_operations(module).get(name)
+        if op is None:
+            raise AttributeError(f"{module} has no step or query {name!r}") from None
+        return _standin_function(op)
+    return getattr(iface, name)
+
+
 def _make_handler(op: spec.Operation):
-    step = op.path.removeprefix("/steps/") if op.is_step else None
+    name = op.function_name
 
     async def handler(request: Request):
         tokens.check(request.headers.get("authorization"), op.module, op.permission)
-        if step is None:
+        if name is None:
             raise Problem(op.module, 501, "not-implemented",
                           detail=f"{op.method} {op.path} is not implemented by the stand-in of {op.module}")
+        fn = interface_function(op.module, name)
         try:
-            data = await request.json()
+            body = await request.json()
         except ValueError:
-            data = {}
-        return {"stepRunId": data.get("stepRunId"), "state": "DONE",
-                "result": standin_result(f"{op.module}.{step}", data)}
+            body = {}
+        if op.is_step:
+            return await run_in_threadpool(fn, body if isinstance(body, dict) else {})
+        # MINIMAL: one value per query parameter; a list-valued parameter needs a route of the module.
+        params = dict(request.path_params) | dict(request.query_params)
+        if op.request_schema and isinstance(body, dict):
+            params |= body
+        return await run_in_threadpool(fn, **params)
 
-    handler.__name__ = f"standin_{op.operation_id or step or 'op'}"
+    handler.__name__ = f"standin_{op.operation_id or name or 'op'}"
     return handler
 
 

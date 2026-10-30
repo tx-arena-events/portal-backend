@@ -24,6 +24,12 @@ def spec_dir() -> Path:
     return Path(os.environ.get("SPEC_DIR") or ROOT / "spec")
 
 
+def snake_case(name: str) -> str:
+    """`create-company` -> `create_company`, `getApplicationInternal` -> `get_application_internal`."""
+    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])", "_", name)
+    return name.replace("-", "_").lower()
+
+
 @dataclass(frozen=True)
 class Operation:
     module: str
@@ -52,6 +58,17 @@ class Operation:
     @property
     def params(self) -> int:
         return self.path.count("{")
+
+    @property
+    def function_name(self) -> str | None:
+        """Name of the function in `modules/<module>/interface.py`: a step by its step name, a query
+        by its operationId, both in snake_case (`create-company` -> `create_company`,
+        `getApplicationInternal` -> `get_application_internal`). None for other operations."""
+        if self.is_step:
+            return snake_case(self.path.removeprefix("/steps/"))
+        if self.is_query and self.operation_id:
+            return snake_case(self.operation_id)
+        return None
 
 
 @dataclass(frozen=True)

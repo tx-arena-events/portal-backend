@@ -21,14 +21,15 @@ from portal_common import events, http, standin
 from portal_common.problems import Problem
 from tools import testdata
 
+from . import interface
+from .interface import MODULE, applications, public
+
 STANDIN = True
-MODULE = "c1-m2"
 router = standin.router(MODULE)
-applications: dict[str, dict] = {}
 
 
 def reset() -> None:
-    applications.clear()
+    interface.reset()
 
 
 def _now() -> str:
@@ -65,10 +66,6 @@ def _own(claims: dict, application_id: str) -> dict:
     return a
 
 
-def _public(a: dict) -> dict:
-    return {k: v for k, v in a.items() if not k.startswith("_")}
-
-
 @router.post("/applications", status_code=201)
 def create_application(body: dict = Body(...), claims: dict = standin.perm(MODULE, "POST", "/applications")):
     if claims.get("company_id"):
@@ -98,12 +95,12 @@ def create_application(body: dict = Body(...), claims: dict = standin.perm(MODUL
     applications[aid] = a
     events.publish({"eventType": "ApplicationCreated", "applicationId": aid, "companyId": cid, "kind": a["kind"],
                     "existingCompany": False})
-    return _public(a)
+    return public(a)
 
 
 @router.get("/applications/{applicationId}")
 def get_application(applicationId: str, claims: dict = standin.perm(MODULE, "GET", "/applications/{applicationId}")):
-    return _public(_own(claims, applicationId))
+    return public(_own(claims, applicationId))
 
 
 @router.post("/applications/{applicationId}/submit")
@@ -121,39 +118,20 @@ def submit(applicationId: str, body: dict = Body(...),
     a["status"] = "SUBMITTED"
     events.publish({"eventType": "ApplicationSubmitted", "applicationId": a["id"], "companyId": a["companyId"],
                     "kind": a["kind"], "existingCompany": a["existingCompany"], "applicantSub": a["applicant"]["sub"]})
-    return _public(a)
+    return public(a)
 
 
 @router.get("/internal/applications/{applicationId}")
 def internal_application(applicationId: str,
                          _: dict = standin.perm(MODULE, "GET", "/internal/applications/{applicationId}")):
-    a = applications.get(applicationId)
-    if not a:
-        raise Problem(MODULE, 404, "not-found")
-    required = [{"agreementKey": x["agreementKey"], "version": x["version"]}
-                for x in testdata.agreements_for_roles(a["companyRoles"])] if a["status"] != "CREATED" else []
-    return _public(a) | {"attestation": a["_attestation"], "requiredAgreements": required}
-
-
-def _step_application(body: dict) -> dict:
-    a = applications.get(body.get("applicationId"))
-    if not a:
-        raise Problem(MODULE, 404, "not-found", retryable=False)
-    return a
+    return interface.get_application_internal(applicationId=applicationId)
 
 
 @router.post("/steps/complete-application")
 def complete(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/complete-application")):
-    a = _step_application(body)
-    if a["status"] != "COMPLETED":
-        a["status"] = "COMPLETED"
-        events.publish({"eventType": "ApplicationCompleted", "applicationId": a["id"], "companyId": a["companyId"],
-                        "kind": a["kind"]})
-    return standin.step_reply(body, {"applicationId": a["id"], "status": a["status"]})
+    return interface.complete_application(body)
 
 
 @router.post("/steps/close-application")
 def close(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps/close-application")):
-    a = _step_application(body)
-    a["status"] = "DECLINED"
-    return standin.step_reply(body, {"applicationId": a["id"], "status": a["status"]})
+    return interface.close_application(body)

@@ -14,14 +14,15 @@ from fastapi import Body
 from portal_common import events, neighbours, standin
 from portal_common.problems import Problem
 
+from . import interface
+from .interface import MODULE, connectors
+
 STANDIN = True
-MODULE = "c6-m1"
 router = standin.router(MODULE)
-connectors: dict[str, dict] = {}
 
 
 def reset() -> None:
-    connectors.clear()
+    interface.reset()
 
 
 @router.post("/connectors", status_code=201)
@@ -31,7 +32,7 @@ def create(body: dict = Body(...), claims: dict = standin.perm(MODULE, "POST", "
         raise Problem(MODULE, 403, "forbidden", detail="no company")
     if not str(body.get("endpoint", "")).startswith("https://") or not body.get("name"):
         raise Problem(MODULE, 400, "validation", detail="name and https endpoint required")
-    company = neighbours.get_json(MODULE, "c3-m1", f"/internal/companies/{cid}")
+    company = neighbours.query(MODULE, "c3-m1", "query_company", companyId=cid)
     if not company or company.get("status") != "ACTIVE":
         raise Problem(MODULE, 409, "company-not-active")
     con = {"connectorId": str(uuid.uuid4()), "companyId": cid, "name": body["name"], "endpoint": body["endpoint"],
@@ -58,4 +59,4 @@ def get_own(connectorId: str, claims: dict = standin.perm(MODULE, "GET", "/conne
 
 @router.get("/internal/connectors")
 def by_technical_user(_: dict = standin.perm(MODULE, "GET", "/internal/connectors"), technicalUserId: str | None = None):
-    return [c for c in connectors.values() if technicalUserId and c.get("technicalUserId") == technicalUserId]
+    return interface.list_connectors_internal(technicalUserId=technicalUserId)

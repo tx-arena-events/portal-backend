@@ -176,7 +176,8 @@ def test_address_resolution(monkeypatch):
     assert neighbours.address("c3-m1") == BASE
 
 
-def test_neighbour_call_sends_service_token_and_maps_errors():
+def test_neighbour_query_over_http_sends_service_token_and_maps_errors(monkeypatch):
+    monkeypatch.setenv("C1_M2_URL", BASE)   # an HTTP address (here served in the same process)
     app = _iam_app()
     seen = {}
 
@@ -188,18 +189,42 @@ def test_neighbour_call_sends_service_token_and_maps_errors():
         return {"id": aid}
 
     problems.install(app, "c1-m2")
-    assert neighbours.get_json("c3-m1", "c1-m2", "/internal/applications/a1") == {"id": "a1"}
+    assert neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="a1") == {"id": "a1"}
     assert seen["azp"] == "svc-c3-m1"
     with pytest.raises(Problem) as e:
-        neighbours.get_json("c3-m1", "c1-m2", "/internal/applications/teapot")
+        neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="teapot")
     assert e.value.name == "neighbour-rejected" and e.value.ext["retryable"] is False
+
+
+def test_neighbour_query_in_process_calls_the_interface_function(monkeypatch):
+    from modules.c1_m2 import interface as c1_m2
+    seen = {}
+
+    def get_application_internal(*, applicationId):
+        seen["applicationId"] = applicationId
+        if applicationId == "teapot":
+            raise Problem("c1-m2", 403)
+        if applicationId == "gone":
+            raise Problem("c1-m2", 404)
+        return {"id": applicationId}
+
+    monkeypatch.setattr(c1_m2, "get_application_internal", get_application_internal)
+    assert neighbours.in_process("c1-m2")
+    assert neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="a1") == {"id": "a1"}
+    assert seen == {"applicationId": "a1"}   # no HTTP, no token
+    assert neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="gone") is None
+    with pytest.raises(Problem) as e:   # the same error rule as over HTTP
+        neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="teapot")
+    assert (e.value.name, e.value.ext["neighbourType"]) == ("neighbour-rejected", "urn:c1-m2:problem:forbidden")
+    with pytest.raises(KeyError):
+        neighbours.query("c3-m1", "c1-m2", "get_application")
 
 
 def test_neighbour_unreachable_is_retryable(monkeypatch):
     _iam_app()
     monkeypatch.setenv("C1_M2_URL", "http://127.0.0.1:9")
     with pytest.raises(Problem) as e:
-        neighbours.get_json("c3-m1", "c1-m2", "/internal/applications/a1")
+        neighbours.query("c3-m1", "c1-m2", "get_application_internal", applicationId="a1")
     assert e.value.name == "upstream-error" and e.value.ext["retryable"] is True
 
 
@@ -257,9 +282,9 @@ def test_fallback_router_mounts_every_spec_operation():
     app.include_router(standin.fallback_router("c3-m2", implemented))
     c = TestClient(app, base_url=BASE)
     tok = bearer(tokens.service_token("c12-m1"))
-    r = c.post("/api/c3-m2/steps/register-company", headers=tok,
-               json={"processId": "p", "stepRunId": "s", "companyId": "c", "ebwoid": "EBWOID-DE-0000000001"})
-    assert r.status_code == 200 and r.json()["result"]["bpn"] == standin.derive_bpn("EBWOID-DE-0000000001")
+    r = c.post("/api/c3-m2/steps/transfer-company", headers=tok,   # stand-in interface function of C3-M2
+               json={"processId": "p", "stepRunId": "s", "companyId": "c", "bpn": "BPNL000000000001"})
+    assert r.status_code == 200 and r.json() == {"stepRunId": "s", "state": "DONE", "result": {"bpn": "BPNL000000000001"}}
     assert c.post("/api/c3-m2/steps/register-did", headers=tok, json={}).json() == {"own": True}
     r = c.get("/api/c3-m2/companies/c", headers=bearer(person_token("otto")))
     assert r.status_code == 501 and r.json()["type"] == "urn:c3-m2:problem:not-implemented"

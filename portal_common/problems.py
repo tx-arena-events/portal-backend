@@ -52,7 +52,8 @@ def _validation(module: str, e: RequestValidationError) -> Problem:
     return Problem(module, 400, "validation", errors=errors)
 
 
-def _to_problem(module: str, exc: Exception, is_step: bool) -> Problem:
+def to_problem(module: str, exc: Exception, is_step: bool) -> Problem:
+    """Any exception as the Problem the HTTP layer would answer with (also for in-process calls)."""
     if isinstance(exc, Problem):
         p = exc
     elif isinstance(exc, RequestValidationError):
@@ -77,7 +78,7 @@ def route_class(module: str) -> type[APIRoute]:
                 try:
                     return await original(request)
                 except Exception as exc:  # noqa: BLE001 - every error leaves as Problem Details
-                    return _to_problem(module, exc, is_step).response()
+                    return to_problem(module, exc, is_step).response()
 
             return handler
 
@@ -97,7 +98,7 @@ def install(app: FastAPI, module: str = "portal") -> None:
 
     @app.exception_handler(Exception)
     async def _any_handler(request: Request, exc: Exception):
-        return _to_problem(module, exc, "/steps/" in request.url.path).response()
+        return to_problem(module, exc, "/steps/" in request.url.path).response()
 
 
 def from_neighbour(module: str, neighbour: str, status: int | None, body: object = None) -> Problem:
