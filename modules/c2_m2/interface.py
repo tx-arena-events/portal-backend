@@ -4,6 +4,8 @@
 IAM), client template and instance clients of apps, and the queries on instance clients."""
 from __future__ import annotations
 
+import datetime as dt
+
 from portal_common import events, standin
 from portal_common.problems import Problem
 from tools import test_iam
@@ -39,7 +41,8 @@ def create_client_template(input: dict) -> dict:
         raise Problem(MODULE, 400, "validation", detail="roles", retryable=False)
     if app_id not in templates:
         templates[app_id] = {"appId": app_id, "clientId": f"app-{standin.stable_id('app', app_id)[:8]}",
-                             "roles": [r["name"] for r in input["roles"]], "appName": input.get("appName")}
+                             "roles": [r if isinstance(r, dict) else {"name": r} for r in input["roles"]],
+                             "appName": input.get("appName")}
         events.publish({"eventType": "AppClientTemplateCreated", "appId": app_id})
     return standin.step_reply(input, {"clientId": templates[app_id]["clientId"]})
 
@@ -51,7 +54,8 @@ def create_instance_client(input: dict) -> dict:
         iid = standin.stable_id("instance-client", *key)
         ic = {"id": iid, "appId": key[0], "offerSubscriptionId": key[1], "customerCompanyId": input.get("customerCompanyId"),
               "instanceKind": input.get("instanceKind"), "instanceUrl": input.get("instanceUrl"),
-              "iamClientId": f"app-{iid[:8]}", "status": "INACTIVE"}
+              "iamClientId": f"app-{iid[:8]}", "status": "INACTIVE",
+              "createdAt": dt.datetime.now(dt.UTC).isoformat()}
         instance_clients[iid] = ic
         events.publish({"eventType": "AppInstanceClientCreated", "appInstanceClientId": iid, "appId": key[0]})
     return standin.step_reply(input, {"id": ic["id"], "iamClientId": ic["iamClientId"]})
@@ -85,6 +89,29 @@ def get_app_instance_client(*, id: str) -> dict:
     if id not in instance_clients:
         raise Problem(MODULE, 404, "not-found")
     return instance_clients[id]
+
+
+def list_app_roles(*, appId: list[str] | str | None = None, lang: str = "en", **_other) -> list[dict]:
+    """9.1: roles of the client templates, in the order of the request."""
+    def described(r: dict) -> dict:
+        ds = r.get("descriptions") or []
+        text = next((d["text"] for d in ds if d.get("lang") == lang), None) or \
+            next((d["text"] for d in ds if d.get("lang") == "en"), None) or (ds[0]["text"] if ds else None)
+        return {"name": r["name"], "description": text, "descriptions": ds}
+    ids = [appId] if isinstance(appId, str) else appId or []
+    return [{"appId": a, "templateExists": a in templates,
+             "roles": sorted((described(r) for r in templates[a]["roles"]), key=lambda r: r["name"]) if a in templates else []}
+            for a in ids]
+
+
+def list_company_user_refs(*, companyId: str, portalRole: str | None = None, status: list[str] | str | None = None,
+                           **_other) -> list[dict]:
+    """9.4: accounts bound to the company in the test IAM (all `ACTIVE`), optionally with a portal role."""
+    wanted = [status] if isinstance(status, str) else status or ["ACTIVE"]
+    if "ACTIVE" not in wanted:
+        return []
+    return [{"userId": uid, "status": "ACTIVE"} for uid, u in test_iam.iam().users.items()
+            if u["companyId"] == companyId and (not portalRole or portalRole in u["roles"])]
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

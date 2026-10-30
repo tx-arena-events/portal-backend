@@ -49,7 +49,8 @@ and 7a first. Do not change code during the review. Report what you find.
 13. **Silent failures:** no `except` that hides an error, no success result with empty content
     (for example a step `DONE` without the object it should create).
 14. **Checks run:** `uv run pytest -q` and `uv run python demo.py` pass. Run both and report the
-    result.
+    result. If one fails, decide first whether the module or the kit (`demo.py`, a kit test, a
+    stand-in) contradicts the spec, and quote the spec section.
 15. **Open questions:** points where the code chooses a reading of an unclear spec are listed in
     `modules/<id>/OPEN-QUESTIONS.md`.
 

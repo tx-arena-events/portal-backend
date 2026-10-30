@@ -37,11 +37,14 @@ def create_wallet(input: dict) -> dict:
                 raise Problem(MODULE, 409 if status in (403, 409) else 502,
                               "provider-rejected" if status in (403, 409) else "upstream-error",
                               detail=f"CSP wallet answered {status}", retryable=status >= 500)
-            wallets[cid] = {"companyId": cid, "status": "ACTIVE", "provider": "CSP", "issuanceMode": "HOLDER_REQUESTS",
+            wallets[cid] = {"walletId": standin.stable_id("wallet", cid), "companyId": cid, "bpn": bpn,
+                            "status": "ACTIVE", "provider": "CSP", "issuanceMode": "HOLDER_REQUESTS",
+                            "supportsWalletAccounts": True,
                             "did": answer["did"], "providerRef": answer["participantContextId"],
                             "_holder": {k: answer[k] for k in ("identityApiUrl", "participantContextId", "apiKey")}}
         else:
-            wallets[cid] = {"companyId": cid, "status": "ACTIVE", "provider": "STUB", "issuanceMode": "STUB",
+            wallets[cid] = {"walletId": standin.stable_id("wallet", cid), "companyId": cid, "bpn": bpn,
+                            "status": "ACTIVE", "provider": "STUB", "issuanceMode": "STUB", "supportsWalletAccounts": False,
                             "did": f"did:web:wallet.example.org:{bpn}", "providerRef": None, "_holder": None}
         events.publish({"eventType": "DataspaceWalletCreated", "companyId": cid, "did": wallets[cid]["did"]})
     return standin.step_reply(input, state="RUNNING")   # long-running; completed by DataspaceWalletCreated

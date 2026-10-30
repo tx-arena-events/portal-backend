@@ -1,9 +1,12 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
-"""Stand-in of C1-M3 Application Review: review case per application, duplicate check at the CSP
-through C3-M2 `find-companies`, approve and decline by OSP staff. In memory.
+"""Stand-in of C1-M3 Application Review: review case per application with the checks `NO_DUPLICATE`
+(C3-M1) and `CSP_MATCH_EXPECTED` (C3-M2 `find-companies`), approve and decline by OSP staff, without
+four-eyes approval and automatic approval. In memory.
 """
 from __future__ import annotations
+
+import datetime as dt
 
 from fastapi import Body
 
@@ -39,7 +42,7 @@ def close_review(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", 
 
 @router.get("/review-cases")
 def list_cases(_: dict = standin.perm(MODULE, "GET", "/review-cases"), page: int = 0, size: int = 20):
-    items = sorted(cases.values(), key=lambda c: c["openedAt"], reverse=True)
+    items = [interface.summary(c) for c in sorted(cases.values(), key=lambda c: c["openedAt"], reverse=True)]
     return {"items": items[page * size:(page + 1) * size], "page": page, "size": size, "total": len(items)}
 
 
@@ -54,7 +57,9 @@ def _decide(case_id: str, claims: dict, outcome: str, reason: str | None = None)
         raise Problem(MODULE, 409, "invalid-state")
     if case["applicantSub"] == claims["sub"]:
         raise Problem(MODULE, 403, "own-application")
-    case["status"], case["decidedBy"] = outcome, claims["sub"]
+    case["status"], case["decidedAt"] = outcome, dt.datetime.now(dt.UTC).isoformat()
+    case["decision"] = {"decidedAt": case["decidedAt"], "comment": reason, "decidedBy": claims["sub"],
+                        "autoApproved": False}
     ev = {"applicationId": case["applicationId"], "companyId": case["companyId"], "kind": case["kind"],
           "existingCompany": case["existingCompany"]}
     if outcome == "APPROVED":

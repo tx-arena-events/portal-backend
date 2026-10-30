@@ -5,7 +5,7 @@ roles checked against C2-M5 6.4), the query of a technical user and the rotation
 for Subscriptions. Secrets only in the answer of the rotation, never in step results or events."""
 from __future__ import annotations
 
-from portal_common import events, standin
+from portal_common import events, standin, tokens
 from portal_common.problems import Problem
 from tools import test_iam
 
@@ -43,15 +43,34 @@ def _get(id: str) -> dict:
     return technical_users[id]
 
 
-def check_technical_user(*, id: str, **_filters) -> dict:
-    """The stand-in ignores the filters `companyId` and `offerSubscriptionId`."""
-    return _get(id)
+def check_technical_user(*, id: str, companyId: str | None = None, offerSubscriptionId: str | None = None,
+                         **_other) -> dict:
+    """9.1: always 200; the stand-in only knows subscription accounts."""
+    tu = technical_users.get(id)
+    if tu is None:
+        return {"exists": False, "usableForConnector": False}
+    usable = tu["companyId"] == companyId and tu["status"] in ("ACTIVE", "PENDING") and (
+        tu["origin"] == "OWN" or (offerSubscriptionId is not None and tu["offerSubscriptionId"] == offerSubscriptionId))
+    return {"exists": True, "belongsToCompany": tu["companyId"] == companyId, "status": tu["status"],
+            "origin": tu["origin"], "walletAccess": "NONE", "disabled": False, "usableForConnector": usable}
 
 
-def rotate_subscription_credentials(*, id: str, **_body) -> dict:
-    """The stand-in ignores `offerSubscriptionId` of the body."""
+def rotate_subscription_credentials(*, id: str, offerSubscriptionId: str | None = None, **_other) -> dict:
+    """9.2: a new secret of the subscription account."""
     tu = _get(id)
-    return {"technicalUserId": id, "clientId": tu["clientId"], "clientSecret": test_iam.iam().rotate_secret(tu["clientId"])}
+    if offerSubscriptionId is not None and tu["offerSubscriptionId"] != offerSubscriptionId:
+        raise Problem(MODULE, 404, "not-found")
+    return {"iamClientId": tu["clientId"], "secret": test_iam.iam().rotate_secret(tu["clientId"]),
+            "tokenUrl": f"{tokens.iam_url()}/realms/{tokens.realm()}/protocol/openid-connect/token"}
+
+
+def list_technical_roles(*, lang: str | None = None, **_other) -> list[dict]:
+    """9.3: the roles of the test IAM (C2-M5 6.4) with the flags of the example values of README 4;
+    the stand-in has no descriptions."""
+    wallet = {"Identity Wallet Management"}
+    provider_only = {"BPDM Pool Consumer", "BPDM Sharing Output Consumer", "BPDM Sharing Input Manager"}
+    return [{"name": r, "description": None, "grantsWalletAccess": r in wallet, "providerOnly": r in provider_only}
+            for r in sorted(test_iam.iam().technical_roles)]
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

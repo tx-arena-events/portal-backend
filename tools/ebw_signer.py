@@ -11,7 +11,8 @@
 - Mounted with prefix `/ebw`: `GET /ebw/jwks` (path of C5-M1 `openapi.yaml`) and, test only,
   `POST /ebw/test/attestations` `{company, givenName, familyName, clientId}` -> `{attestation}`;
   without `clientId` the first registered client.
-Set `EBW_CONNECTOR_URL` of the installation to `<BASE_URL>/ebw`.
+The installations set `ATTESTATION_JWKS_URL` (C1-M2) to `<BASE_URL>/ebw/jwks` and
+`EBW_CONNECTOR_URL` (C3-M1) to `<BASE_URL>/ebw`; `ATTESTATION_ISSUER` is `ISSUER`.
 """
 from __future__ import annotations
 
@@ -64,8 +65,13 @@ def sign(company: str = "maschinenbau", given_name: str = "Erika", family_name: 
         "company": {"legal_name": c["legalName"], "ebwoid": c["ebwoid"], "euid": c["euid"], "address": c["address"],
                     "country": c["address"]["country"]},
         "representation": {"confirmed": True, "result": "CONFIRMED", "type": "legal_representative"},
-        "evidence": [{"type": "PID", "wallet": "EUDI_WALLET"}, {"type": "MANDATE", "wallet": "EUDI_WALLET"},
-                     {"type": "LPID", "wallet": "BUSINESS_WALLET"}],
+        "evidence": [   # C5-M1 / C1-M2 14.4
+            {"type": "PID", "vct": "urn:eudi:pid:1", "issuer": "https://pid.test.example.org",
+             "wallet": "EUDI_WALLET", "status_checked": False},
+            {"type": "MANDATE", "vct": "urn:tx:test:mandate:1", "issuer": "https://register.test.example.org",
+             "wallet": "EUDI_WALLET", "status_checked": True},
+            {"type": "LPID", "vct": "urn:tx:test:lpid:1", "issuer": "https://register.test.example.org",
+             "wallet": "BUSINESS_WALLET", "status_checked": False}],
         **over,
     }
     priv = key()[0]

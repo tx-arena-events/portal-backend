@@ -19,7 +19,13 @@ def agreements() -> list[dict]:
 
 
 def agreements_for_roles(roles: list[str]) -> list[dict]:
+    """Terms assigned to one of the company roles (scope `COMPANY_ROLE`)."""
     return [a for a in agreements() if set(a["companyRoles"]) & set(roles)]
+
+
+def required_agreements(roles: list[str]) -> list[dict]:
+    """Required terms of an application (C1-M2 6.8): scope `ALL` plus the terms of the roles."""
+    return [a for a in agreements() if a["scope"] == "ALL" or set(a["companyRoles"]) & set(roles)]
 
 
 def agreement_id(key: str, version: str) -> str | None:

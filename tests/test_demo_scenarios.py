@@ -1,7 +1,9 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
-"""Acceptance scenarios 1-3 of demo.py in one process: installation OSP A with all stand-ins plus the
-shared CSP stand-in, without any workaround. demo.py runs the same code against real processes."""
+"""Acceptance scenarios 1-3 of demo.py in one process: installation OSP A with the modules of the
+repository (stand-ins or team modules) plus the shared CSP stand-in, without any workaround.
+demo.py runs the same code against real processes."""
+import contextlib
 import json
 
 from fastapi.testclient import TestClient
@@ -17,7 +19,9 @@ from tools.keys import ec_jwk
 CSP = "http://csp.test"
 
 
-def test_scenarios_1_to_3_with_stand_ins(tmp_path, monkeypatch):
+@contextlib.contextmanager
+def installation(tmp_path, monkeypatch):
+    """OSP A with the shared CSP stand-in in one process; yields after scenarios 1-3 ran."""
     priv, pub = ec_jwk("osp-a")
     (tmp_path / "key.json").write_text(json.dumps(priv))
     (tmp_path / "trust.json").write_text(json.dumps({demo.OSP_A_ID: {
@@ -33,9 +37,18 @@ def test_scenarios_1_to_3_with_stand_ins(tmp_path, monkeypatch):
     app = scaffold_app.create_app()
     with TestClient(app, base_url=BASE):
         t = demo.Target(osp_a=BASE, csp=CSP, quiet=True)
-        ok = demo.run(t, ["1", "2", "3"])
+        t.ok = demo.run(t, ["1", "2", "3"])
+        try:
+            yield t
+        finally:
+            scaffold_app.reset_all(app.state.entries)   # no state (e.g. provider calls) for later tests
+
+
+def test_scenarios_1_to_3_with_stand_ins(tmp_path, monkeypatch):
+    with installation(tmp_path, monkeypatch) as t:
+        pass
     failed = [(s, label, d) for s, steps in t.results.items() for label, o, d in steps if not o]
     for f in failed:
         print("FAILED", f)
-    assert ok and not failed, failed
+    assert t.ok and not failed, failed
     assert sum(len(v) for v in t.results.values()) >= 30

@@ -28,10 +28,12 @@ def create_for_subscription(body: dict = Body(...),
 
 
 @router.get("/internal/technical-users/{id}")
-def get_technical_user(id: str, _: dict = standin.perm(MODULE, "GET", "/internal/technical-users/{id}")):
-    return interface.check_technical_user(id=id)
+def get_technical_user(id: str, companyId: str | None = None, offerSubscriptionId: str | None = None,
+                       _: dict = standin.perm(MODULE, "GET", "/internal/technical-users/{id}")):
+    return interface.check_technical_user(id=id, companyId=companyId, offerSubscriptionId=offerSubscriptionId)
 
 
 @router.post("/internal/technical-users/{id}/credentials/rotate")
-def rotate(id: str, _: dict = standin.perm(MODULE, "POST", "/internal/technical-users/{id}/credentials/rotate")):
-    return interface.rotate_subscription_credentials(id=id)
+def rotate(id: str, body: dict = Body(default={}),
+           _: dict = standin.perm(MODULE, "POST", "/internal/technical-users/{id}/credentials/rotate")):
+    return interface.rotate_subscription_credentials(id=id, offerSubscriptionId=body.get("offerSubscriptionId"))

@@ -58,12 +58,32 @@ def send_activation_callback(input: dict) -> dict:
         return standin.step_reply(input)    # without a callbackUrl: nothing to do
     technical_user = None
     for acc in input.get("technicalUsers") or []:
-        r = neighbours.query(MODULE, "c2-m3", "rotate_subscription_credentials", id=acc["technicalUserId"])
-        technical_user = {k: r[k] for k in ("clientId", "clientSecret")}
+        r = neighbours.query(MODULE, "c2-m3", "rotate_subscription_credentials", id=acc["technicalUserId"],
+                             offerSubscriptionId=s["offerSubscriptionId"])
+        technical_user = {"clientId": r["iamClientId"], "clientSecret": r["secret"]}
     _provider_call(s["providerCompanyId"], "callback", {"offerSubscriptionId": s["offerSubscriptionId"],
                                                         "instanceUrl": s["instanceUrl"], "clientId": client_id,
                                                         "technicalUser": technical_user})
     return standin.step_reply(input)
+
+
+def find_subscriptions(*, customerCompanyId: str | None = None, offerId: str | None = None,
+                       status: list[str] | str | None = None, **_other) -> list[dict]:
+    """9.1: `SubscriptionRef` of the matching subscriptions."""
+    wanted = [status] if isinstance(status, str) else status or []
+    return [{k: s[k] for k in ("offerSubscriptionId", "offerId", "customerCompanyId", "status")}
+            for s in subscriptions.values()
+            if (not customerCompanyId or s["customerCompanyId"] == customerCompanyId)
+            and (not offerId or s["offerId"] == offerId) and (not wanted or s["status"] in wanted)]
+
+
+def get_subscription_internal(*, offerSubscriptionId: str) -> dict:
+    """9.2: `SubscriptionInternal`."""
+    s = subscriptions.get(offerSubscriptionId)
+    if not s:
+        raise Problem(MODULE, 404, "not-found")
+    return {k: s[k] for k in ("offerSubscriptionId", "offerId", "customerCompanyId", "status", "offerType",
+                              "instanceKind", "providerCompanyId", "instanceUrl")}
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

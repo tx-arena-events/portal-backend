@@ -3,7 +3,7 @@
   "ospName": "OSP A",
   "ospCompanyId": "11111111-1111-4111-8111-111111111111",
   "dataspace": { "memberOf": "Catena-X", "name": "Catena-X" },
-  "masterDataFile": null,
+  "masterDataFile": "../master-data.json",
   "moduleConfigFile": "module-config.json",
   "ospCompanyFile": "../../testdata/osp-a-company.json",
   "testPersonsFile": "../../testdata/persons-osp-a.json"

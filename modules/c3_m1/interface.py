@@ -1,7 +1,8 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
 """Public interface of the C3-M1 stand-in: seed of the OSP company, the onboarding steps and the
-query `queryCompany` for other modules and Process Orchestration. In memory.
+queries `queryCompany`, `queryCompanies` and `findIdentifierMatches` for other modules and Process
+Orchestration. In memory.
 
 `create-company` reads the application from C1-M2 (`ApplicationInternal` as C1-M2 specifies it)
 and maps it as C3-M1 11.1 describes. Consents are mapped from `agreementKey` + `version` to
@@ -10,6 +11,7 @@ and maps it as C3-M1 11.1 describes. Consents are mapped from `agreementKey` + `
 from __future__ import annotations
 
 import datetime as dt
+import re
 
 from portal_common import events, neighbours, settings, standin
 from portal_common.problems import Problem
@@ -60,7 +62,7 @@ def create_company(input: dict) -> dict:
             "identifiers": [{"type": i["type"], "value": i["value"],
                              "source": "BUSINESS_WALLET" if i.get("source") == "ATTESTATION" else "DECLARED"}
                             for i in data["identifiers"]],
-            "coreDataSource": "BUSINESS_WALLET" if app["verification"] == "EBW" else "MANUAL",
+            "coreDataSource": "EBW" if app["verification"] == "EBW" else "MANUAL",
             "status": "REQUESTED", "bpn": None, "companyRoles": [], "requestedRoles": app["companyRoles"],
             "consents": [{"agreementId": testdata.agreement_id(c["agreementKey"], c["version"]), "status": "ACTIVE",
                           "consentedAt": c.get("givenAt"), "consentedBy": app["applicant"]["sub"]}
@@ -110,6 +112,43 @@ def query_company(*, companyId: str) -> dict:
     if not c:
         raise Problem(MODULE, 404, "not-found")
     return view(c)
+
+
+def query_companies(*, id: list[str] | str | None = None, bpn: list[str] | str | None = None, **_other) -> dict:
+    """9.2: companies by ID or BPN, `notFound` lists the values without a company."""
+    ids = [id] if isinstance(id, str) else id or []
+    bpns = [bpn] if isinstance(bpn, str) else bpn or []
+    items = [c for c in companies.values() if c["id"] in ids or (c["bpn"] and c["bpn"] in bpns)]
+    found = {c["id"] for c in items} | {c["bpn"] for c in items}
+    return {"items": [view(c) for c in items], "notFound": [v for v in ids + bpns if v not in found]}
+
+
+def _ident_key(value: str) -> str:
+    """Comparison per type in upper case without spaces, `.`, `-`, `/` (C1-M3 11.2)."""
+    return re.sub(r"[\s.\-/]", "", str(value)).upper()
+
+
+def find_identifier_matches(*, identifiers: list[dict], excludeCompanyId: str | None = None,
+                            statuses: list[str] | None = None, **_other) -> dict:
+    """9.3 without the name comparison: companies with one of the identifiers (BPN as an identifier too)."""
+    wanted = {(i["type"], _ident_key(i["value"])) for i in identifiers}
+    matches = []
+    for c in companies.values():
+        if c["id"] == excludeCompanyId or (statuses and c["status"] not in statuses):
+            continue
+        own = {(i["type"], _ident_key(i["value"])) for i in c["identifiers"]} | ({("BPN", _ident_key(c["bpn"]))} if c["bpn"] else set())
+        on = sorted({t for t, _ in wanted & own})
+        if on:
+            matches.append({"companyId": c["id"], "name": c["name"], "status": c["status"], "bpn": c["bpn"],
+                            "matchedOn": on})
+    return {"matches": matches}
+
+
+def role_view(c: dict) -> dict:
+    """`Company` of the paths for people (7.1, 7.9): company roles with their status."""
+    roles = [{"companyRole": r, "status": "ACTIVE"} for r in c["companyRoles"]] + \
+        [{"companyRole": r, "status": "REQUESTED"} for r in c["requestedRoles"] if r not in c["companyRoles"]]
+    return view(c) | {"companyRoles": roles, "dataspaceName": (settings.get("dataspace") or {}).get("name")}
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

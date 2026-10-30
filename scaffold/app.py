@@ -28,12 +28,13 @@ def _defaults() -> None:
     os.environ.setdefault("MODULE_URLS_DEFAULT", "in-process")
     os.environ.setdefault("EBW_CONNECTOR_URL", base + "/ebw")
     # Configuration variables of the modules for this installation (`moduleConfigFile`, e.g.
-    # ATTESTATION_CLIENT_IDS, ISSUER_MODE); the process environment wins.
+    # ATTESTATION_CLIENT_IDS, ISSUER_MODE); the process environment wins. `{BASE_URL}` in a value
+    # is the address of the installation.
     file = settings.resolve_path(settings.get("moduleConfigFile"))
     if file and file.exists():
         for k, v in json.loads(file.read_text(encoding="utf-8")).items():
             if not k.startswith("_"):
-                os.environ.setdefault(k, str(v))
+                os.environ.setdefault(k, str(v).replace("{BASE_URL}", base))
 
 
 def reset_all(entries) -> None:

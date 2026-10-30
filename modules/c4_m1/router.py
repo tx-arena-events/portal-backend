@@ -62,4 +62,4 @@ def query_credentials(companyId: str,
 @router.get("/companies/{companyId}/credentials")
 def own_credentials(companyId: str, claims: dict = standin.perm(MODULE, "GET", "/companies/{companyId}/credentials")):
     standin.company_scope(MODULE, claims, companyId)
-    return interface.query_company_credentials(companyId=companyId)
+    return interface.query_company_credentials(companyId=companyId)["credentials"]   # 7.1: list

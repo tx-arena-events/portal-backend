@@ -42,6 +42,12 @@ def in_process(target: str) -> bool:
     return _configured(target) == IN_PROCESS
 
 
+def is_standin(target: str) -> bool:
+    """True if the address of `target` is empty: the caller answers with its built-in stand-in
+    (README section 11 of the caller) instead of calling `target`."""
+    return not _configured(target)
+
+
 def address(target: str) -> str:
     """HTTP address of `target` (`BASE_URL` for `in-process`), empty for the built-in stand-in."""
     env = _configured(target)

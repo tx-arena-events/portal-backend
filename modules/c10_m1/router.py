@@ -72,7 +72,7 @@ def get_subscription(offerSubscriptionId: str,
     return s | {"setupStatus": _setup_status(s["offerSubscriptionId"])}
 
 
-@router.post("/subscriptions/{offerSubscriptionId}/start-setup")
+@router.post("/subscriptions/{offerSubscriptionId}/start-setup", status_code=202)
 def start_setup(offerSubscriptionId: str, body: dict = Body(default={}),
                 claims: dict = standin.perm(MODULE, "POST", "/subscriptions/{offerSubscriptionId}/start-setup")):
     s = _visible(claims, offerSubscriptionId, provider_only=True)

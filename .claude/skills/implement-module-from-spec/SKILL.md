@@ -79,8 +79,10 @@ For every call in README section 11:
   defines it: `in-process` → direct call of the function in `modules.<neighbour>.interface`; a
   URL → HTTP with the service token. Either way a neighbour error arrives as
   `502 neighbour-rejected` (not retryable) or `502 upstream-error` (retryable).
-- Empty address → the built-in stand-in described in section 11. It answers with the field names
-  of the neighbour's spec, not with names you choose.
+- Empty address → the built-in stand-in described in section 11; `neighbours.is_standin("<neighbour>")`
+  is true then. It answers with the field names of the neighbour's spec, not with names you choose.
+- The function name is always the `operationId` in snake_case, also where section 11 names
+  another in-process function (for example `get_company` → `query_company`).
 - Import only from `modules.<neighbour>.interface`, never from its `router.py` or other files.
 - A failed call is an error, not "not found". Only a 404 or an empty list means "not found".
 

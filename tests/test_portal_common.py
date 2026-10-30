@@ -172,8 +172,9 @@ def test_address_resolution(monkeypatch):
     assert neighbours.address("c3-m1") == BASE
     monkeypatch.setenv("MODULE_URLS", json.dumps({"c3-m1": "", "c8-m1": "http://offers:9000/"}))
     assert neighbours.address("c3-m1") == "" and neighbours.address("c8-m1") == "http://offers:9000"
+    assert neighbours.is_standin("c3-m1") and not neighbours.is_standin("c8-m1") and not neighbours.is_standin("c1-m2")
     monkeypatch.setenv("C3_M1_URL", "in-process")
-    assert neighbours.address("c3-m1") == BASE
+    assert neighbours.address("c3-m1") == BASE and not neighbours.is_standin("c3-m1")
 
 
 def test_neighbour_query_over_http_sends_service_token_and_maps_errors(monkeypatch):

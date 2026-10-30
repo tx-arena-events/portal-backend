@@ -137,7 +137,8 @@ def find_companies(*, ebwoid: str | None = None, euid: str | None = None, identi
     if status == 400:
         raise Problem(MODULE, 400, "validation")
     _check(status, answer)
-    return answer
+    # CspCompanyMatch (9): the CSP does not know which OSP asks
+    return [r | {"homeIsThisOsp": r.get("homeOspId") == settings.get("ospId")} for r in answer]
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

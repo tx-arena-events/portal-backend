@@ -170,7 +170,7 @@ def check(doc: dict) -> list[str]:
 
 DEFAULT_STANDIN = {
     "lookups": {
-        "c3-m1.queryCompany": {"name": "Beispiel Maschinenbau GmbH", "status": "REQUESTED", "coreDataSource": "BUSINESS_WALLET",
+        "c3-m1.queryCompany": {"name": "Beispiel Maschinenbau GmbH", "status": "REQUESTED", "coreDataSource": "EBW",
                                "identifiers": [{"type": "EBWOID", "value": "EBWOID-DE-0000000001"},
                                                {"type": "EUID", "value": "DEXX001T.HRB100001"}],
                                "address": {"street": "Musterstraße", "houseNumber": "1", "postalCode": "70569",

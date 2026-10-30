@@ -1,5 +1,7 @@
 {
-  "_comment": "Configuration variables of the modules (section 4 of each spec) for this installation. Set as defaults at start-up; the process environment wins. CSP addresses and keys come from demo.py. Empty CSP_ISSUER_URL = route STUB of C4-M1 (hackathon, OP-53); `demo.py --csp-issuer` points it to the issuer API of the CSP stand-in.",
+  "_comment": "Configuration variables of the modules (section 4 of each spec) for this installation. Set as defaults at start-up; the process environment wins; `{BASE_URL}` stands for the address of the installation. CSP addresses and keys come from demo.py. Empty CSP_ISSUER_URL = route STUB of C4-M1 (hackathon, OP-53); `demo.py --csp-issuer` points it to the issuer API of the CSP stand-in.",
+  "ATTESTATION_ISSUER": "https://ebw-connector.example.org",
+  "ATTESTATION_JWKS_URL": "{BASE_URL}/ebw/jwks",
   "ATTESTATION_CLIENT_IDS": "osp-b-ui",
   "CLIENTS_FILE": "config/osp-b/ebw-clients.json",
   "ISSUER_MODE": "CSP",

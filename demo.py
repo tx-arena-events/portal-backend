@@ -115,11 +115,14 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
     """FRAMEWORK 5.2 with the Business Wallet; returns True when the company is ACTIVE.
     `ui_client` is the client of the installation's UI at the EBW-Connector (FRAMEWORK 7a)."""
     tok = t.token(base, applicant)
-    perms = t.claims(base, applicant)["resource_access"]["portal-core"]["roles"]
+    me = t.claims(base, applicant)
+    perms = me["resource_access"]["portal-core"]["roles"]
     t.check("applicant signs in (Applicant, register_company)", "register_company" in perms)
 
     def application(client: str) -> dict:
-        att = t.call("POST", f"{base}/ebw/test/attestations", json={"company": company, "clientId": client})
+        # the representative in the attestation is the applicant (C1-M2 6.4 rule 10)
+        att = t.call("POST", f"{base}/ebw/test/attestations", json={"company": company, "clientId": client,
+                     "givenName": me.get("given_name"), "familyName": me.get("family_name")})
         return {"kind": "ONBOARDING", "verification": "EBW", "attestation": att.json()["attestation"],
                 "companyRoles": ["ACTIVE_PARTICIPANT"],
                 "companyData": {"identifiers": [{"type": "VAT_ID", "value": "DE123456789" if company == "maschinenbau"
@@ -134,8 +137,9 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
         return False
     app = r.json()
     t.ctx[f"{company}.companyId"], aid = app["companyId"], app["id"]
+    # required terms of C1-M2 6.8: osp-terms for every application, two for ACTIVE_PARTICIPANT
     consents = [{"agreementKey": k, "version": "1.0", "language": "en"}
-                for k in ("terms-active-participant", "security-regulations")]
+                for k in ("osp-terms", "terms-active-participant", "security-regulations")]
     r = t.call("POST", f"{base}/api/c1-m2/applications/{aid}/submit", tok, json={"consents": consents})
     t.check("C1-M2 submit with consents -> ApplicationSubmitted", r.status_code == 200 and r.json()["status"] == "SUBMITTED",
             r.text[:200])
@@ -148,9 +152,10 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
     case = next((c for c in cases if c["applicationId"] == aid), None)
     if not t.check("C1-M3 review case visible to the OSP Reviewer", case is not None):
         return False
-    checks = {c["checkKey"]: c["result"] for c in case["checks"]}
-    t.check("C1-M3 duplicate check at the CSP through C3-M2 passed", checks.get("DUPLICATE_AT_CSP") == "PASSED",
-            json.dumps(checks))
+    detail = t.call("GET", f"{base}/api/c1-m3/review-cases/{case['id']}", rv).json()
+    checks = {c["checkKey"]: c["result"] for c in detail.get("checks", [])}
+    t.check("C1-M3 duplicate check at the CSP through C3-M2 passed (CSP_MATCH_EXPECTED)",
+            checks.get("CSP_MATCH_EXPECTED") == "PASSED", json.dumps(checks))
     r = t.call("POST", f"{base}/api/c1-m3/review-cases/{case['id']}/approve", rv)
     t.check("OSP Reviewer approves -> ApplicationApproved", r.status_code == 200, r.text[:200])
     p = t.process(base, admin, "onboarding", aid, ("COMPLETED", "FAILED", "ENDED"), timeout=60)
@@ -159,8 +164,9 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
     cid = app["companyId"]
     c = t.call("GET", f"{base}/api/c3-m1/osp/companies/{cid}", t.token(base, admin)).json()
     t.ctx[f"{company}.bpn"] = c.get("bpn")
+    roles = {r.get("companyRole"): r.get("status") for r in c.get("companyRoles", [])}
     t.check("C3-M1: company ACTIVE with BPN and company role ACTIVE_PARTICIPANT",
-            c.get("status") == "ACTIVE" and c.get("bpn") and "ACTIVE_PARTICIPANT" in c.get("companyRoles", []),
+            c.get("status") == "ACTIVE" and c.get("bpn") and roles.get("ACTIVE_PARTICIPANT") == "ACTIVE",
             json.dumps({k: c.get(k) for k in ("status", "bpn", "companyRoles")}))
     t.note(f"companyId {cid}, BPN {c.get('bpn')}"
            + (" (test IDs of FRAMEWORK 7a)" if company == "maschinenbau" else " (no test IDs in FRAMEWORK 7a)"))
@@ -179,7 +185,8 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
             claims.get("company_id") == cid and claims.get("bpn") == c.get("bpn")
             and "manage_company_users" in claims["resource_access"]["portal-core"]["roles"],
             json.dumps({k: claims.get(k) for k in ("company_id", "bpn")}))
-    creds = t.call("GET", f"{base}/api/c4-m1/companies/{cid}/credentials", tok).json().get("credentials", [])
+    r = t.call("GET", f"{base}/api/c4-m1/companies/{cid}/credentials", tok)
+    creds = r.json() if r.status_code == 200 else []
     t.check("C4-M1: credentials BPN and MEMBERSHIP ISSUED",
             {x["credentialType"]: x["status"] for x in creds} == {"BPN": "ISSUED", "MEMBERSHIP": "ISSUED"}, json.dumps(creds))
     inbox = [n["type"] for n in t.call("GET", f"{base}/api/c11-m1/notifications", tok).json().get("items", [])]
@@ -222,7 +229,8 @@ def scenario_3(t: Target) -> None:
     if not t.check("C8-M1: provider (OSP company, APP_PROVIDER) creates an app offer", r.status_code == 201, r.text[:200]):
         return
     oid = r.json()["offerId"]
-    t.call("PUT", f"{base}/api/c8-m1/offers/{oid}/roles", pia, json=[{"name": "Viewer"}, {"name": "Editor"}])
+    t.call("PUT", f"{base}/api/c8-m1/offers/{oid}/roles", pia,
+           json=[{"name": n, "descriptions": [{"lang": "en", "text": n}]} for n in ("Viewer", "Editor")])
     t.call("PUT", f"{base}/api/c8-m1/offers/{oid}/technical-user-profile", pia,
            json={"name": "connector-sync", "roles": [{"name": "Dataspace Discovery"}]})
     r = t.call("POST", f"{base}/api/c8-m1/offers/{oid}/submit", pia)
@@ -239,7 +247,7 @@ def scenario_3(t: Target) -> None:
         "clientId": "portal", "clientSecret": "test-only-provider-secret"})
     t.check("C10-M1: provider stores its provider configuration", r.status_code == 200, r.text[:200])
     erika = t.token(base, "erika")
-    r = t.call("POST", f"{base}/api/c10-m1/subscriptions", erika, json={"offerId": oid})
+    r = t.call("POST", f"{base}/api/c10-m1/subscriptions", erika, json={"offerId": oid, "agreementConsents": []})
     if not t.check("C10-M1: customer (scenario 1 company) subscribes", r.status_code == 201, r.text[:200]):
         return
     sid = r.json()["offerSubscriptionId"]
@@ -251,7 +259,7 @@ def scenario_3(t: Target) -> None:
             t.trace(p) + f" setup={setup}")
     r = t.call("POST", f"{base}/api/c10-m1/subscriptions/{sid}/start-setup", pia,
                json={"instanceUrl": "https://demo-app.customer.example"})
-    t.check("C10-M1: provider starts the setup -> SubscriptionSetupStarted", r.status_code == 200, r.text[:200])
+    t.check("C10-M1: provider starts the setup -> SubscriptionSetupStarted", r.status_code == 202, r.text[:200])
     p = t.process(base, "otto", "subscription-setup", sid, ("WAITING", "FAILED"))
     st = {s["stepKey"]: s["state"] for s in (p or {}).get("steps", [])}
     t.check("C12 subscription-setup: instance client (C2-M2) and technical user (C2-M3) DONE, WAITING for activation",

@@ -14,7 +14,7 @@ from fastapi import Body
 from portal_common import standin
 
 from . import interface
-from .interface import MODULE, companies, get_company, view
+from .interface import MODULE, get_company, role_view
 
 STANDIN = True
 router = standin.router(MODULE)
@@ -52,10 +52,10 @@ def query_company(companyId: str, _: dict = standin.perm(MODULE, "GET", "/intern
 
 @router.get("/osp/companies/{companyId}")
 def osp_company(companyId: str, _: dict = standin.perm(MODULE, "GET", "/osp/companies/{companyId}")):
-    return view(get_company(companyId)) | {"requestedRoles": companies[companyId]["requestedRoles"]}
+    return role_view(get_company(companyId))
 
 
 @router.get("/companies/{companyId}")
 def own_company(companyId: str, claims: dict = standin.perm(MODULE, "GET", "/companies/{companyId}")):
     standin.company_scope(MODULE, claims, companyId)
-    return view(get_company(companyId))
+    return role_view(get_company(companyId))

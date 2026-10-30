@@ -38,7 +38,10 @@ variable names, own test data and silent errors. The rules below prevent this.
 6. Configuration variables: use the names exactly as in section 4 ("Configuration") of your module
    README. Read them from the process environment in `reset()` or at call time, never at import.
    `config/osp-*/module-config.json` sets the values per installation. Do not read the address
-   variable of a neighbour yourself; `portal_common.neighbours` resolves it.
+   variable of a neighbour yourself; `portal_common.neighbours` resolves it. It reads
+   `<MODULE>_URL` (for example `C3_M1_URL`) and `MODULE_URLS`, not yet the names of section 4
+   (`COMPANY_URL`, `REVIEW_URL`, ...). `neighbours.is_standin("<neighbour>")` tells you when to
+   answer with your built-in stand-in (empty address).
 7. Test data only from FRAMEWORK 7a and `testdata/` (helpers in `tools/testdata.py`). Do not
    create other IDs for objects that 7a lists.
 8. Events: names and fields as in FRAMEWORK section 6 and section 10 of your README. Publish with
@@ -64,7 +67,9 @@ variable names, own test data and silent errors. The rules below prevent this.
    `urn:c3-m1:problem:invalid-state`.
 5. The router is a thin HTTP layer (token, permission, then the interface function).
 6. Neighbour address per FRAMEWORK 4.7: `in-process` → direct call of the interface function;
-   URL → HTTP with service token (`portal_common.neighbours`); empty → built-in stand-in.
+   URL → HTTP with service token (`portal_common.neighbours`); empty → built-in stand-in
+   (`neighbours.is_standin(target)`). If README section 11 names an in-process function that
+   differs from this convention (for example `get_company`), the convention wins.
 7. C12 finds steps and queries by these names. Stand-in modules expose the same functions, so a
    team replaces the stand-in folder and nothing else changes.
 
@@ -73,7 +78,8 @@ The folder name uses `c3_m1`; the spec, the URL path, `Problem` and `service_tok
 ## The module folder
 
 `interface.py` (public functions), `router.py` (`router` under `/api/<id>`, `reset()`, optional
-`on_event(event)` and `on_startup()`; remove `STANDIN = True`), an empty `__init__.py`.
+`on_event(event)` and `on_startup()`; remove `STANDIN = True`), an empty `__init__.py`. Further
+files of the module (for example `service.py`, data files) belong in the same folder.
 Operations you have not implemented yet are added from the spec (steps answer `DONE`, others 501).
 
 ## Definition of done
