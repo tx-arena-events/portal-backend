@@ -3,7 +3,7 @@
 """Stand-in of C1-M2 Registration: just enough for the onboarding path (FRAMEWORK 5.2).
 
 Implemented: create an application with a verification attestation (checked against the JWKS of
-`EBW_CONNECTOR_URL`), read it, submit it with consents, the query `ApplicationInternal`, the steps
+`EBW_CONNECTOR_URL` and `ATTESTATION_CLIENT_IDS`), read it, submit it with consents, the query `ApplicationInternal`, the steps
 `complete-application` and `close-application`. Everything else of the spec answers 501.
 In memory. Replace this folder with the team's module.
 """
@@ -41,9 +41,13 @@ def _verify_attestation(token: str) -> dict:
         keys = http.request("GET", f"{base}/jwks").json()["keys"]
         kid = jwt.get_unverified_header(token).get("kid")
         jwk = next(k for k in keys if k.get("kid") == kid)
-        return jwt.decode(token, jwt.PyJWK(jwk).key, algorithms=["ES256"], audience="portal-registration")
+        claims = jwt.decode(token, jwt.PyJWK(jwk).key, algorithms=["ES256"], audience="portal-registration")
     except Exception as e:  # noqa: BLE001 - every failure is an invalid attestation
         raise Problem(MODULE, 400, "attestation-invalid", detail=type(e).__name__) from e
+    allowed = [c.strip() for c in os.environ.get("ATTESTATION_CLIENT_IDS", "").split(",") if c.strip()]
+    if allowed and claims.get("client_id") not in allowed:   # C1-M2 6.4 rule 9
+        raise Problem(MODULE, 400, "attestation-invalid", reason="client")
+    return claims
 
 
 def _address(a: dict) -> dict:
@@ -77,7 +81,13 @@ def create_application(body: dict = Body(...), claims: dict = standin.perm(MODUL
     identifiers = [{"type": "EBWOID", "value": company["ebwoid"], "source": "ATTESTATION"},
                    {"type": "EUID", "value": company["euid"], "source": "ATTESTATION"}]
     identifiers += [{**i, "source": "APPLICANT"} for i in given.get("identifiers", [])]
-    aid, cid = str(uuid.uuid4()), str(uuid.uuid4())
+    # MINIMAL: C1-M2 7.2 generates the companyId; the stand-in takes the test ID of FRAMEWORK 7a for a
+    # test company once per installation, so that the IDs of 7a appear in the flows. A module of a
+    # team may generate a random one; demo.py does not depend on it.
+    cid = testdata.test_company_id(company.get("ebwoid"))
+    if not cid or any(a["companyId"] == cid for a in applications.values()):
+        cid = str(uuid.uuid4())
+    aid = str(uuid.uuid4())
     a = {"id": aid, "companyId": cid, "kind": "ONBOARDING", "existingCompany": False, "verification": "EBW",
          "applicant": {"sub": claims["sub"], "givenName": claims.get("given_name"), "familyName": claims.get("family_name")},
          "status": "CREATED", "companyRoles": body.get("companyRoles") or ["ACTIVE_PARTICIPANT"],

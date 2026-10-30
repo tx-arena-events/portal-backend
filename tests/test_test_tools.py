@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from conftest import BASE
 from portal_common import http as phttp
 from portal_common import tokens
+from portal_common.standin import derive_bpn
 from tools import ebw_signer, provider_double, test_iam, testdata
 
 REALM = "/auth/realms/CX-Central"
@@ -89,5 +90,24 @@ def test_test_data_package_is_consistent():
     assert osp["companyId"] == "11111111-1111-4111-8111-111111111111" and osp["bpn"] == "BPNL00000000OSPA"
     assert {"ONBOARDING_SERVICE_PROVIDER", "ACTIVE_PARTICIPANT", "APP_PROVIDER", "SERVICE_PROVIDER"} <= set(osp["companyRoles"])
     iam = test_iam.iam()
-    assert iam.find("rolf") == "bbede0f3-fbc4-433b-b7ca-1982e8724912"   # C2-M5 14.2
-    assert iam.person(iam.find("erika"))["companyId"] is None           # one state: applicant
+    framework_7a = {"erika": "5a1c0001-0000-4000-8000-000000000001", "max": "5a1c0002-0000-4000-8000-000000000002",
+                    "hans": "5a1c0003-0000-4000-8000-000000000003", "lieschen": "5a1c0004-0000-4000-8000-000000000004",
+                    "otto": "5a1c0012-0000-4000-8000-000000000012", "rolf": "bbede0f3-fbc4-433b-b7ca-1982e8724912"}
+    for key, sub in framework_7a.items():   # start state of a hackathon installation: nobody bound
+        assert iam.find(key) == sub and iam.person(sub)["companyId"] is None, key
+    assert "OSP Admin" in iam.person(framework_7a["otto"])["portalRoles"]
+    assert "OSP Reviewer" in iam.person(framework_7a["rolf"])["portalRoles"]
+    assert testdata.test_company_id("EBWOID-DE-0000000001") == "c0000001-0000-4000-8000-000000000001"
+    assert derive_bpn("EBWOID-DE-0000000001") == "BPNLIUK2REMLK3F4"   # FRAMEWORK 7a, C3-M2 11.3
+    logistik = testdata.applicant_companies()["logistik"]
+    assert logistik["companyId"] == "c0000002-0000-4000-8000-000000000002" and "ebwoid" not in logistik
+    assert {"type": "COMMERCIAL_REG_NUMBER", "value": "HRB 200002"} in logistik["identifiers"]
+
+
+def test_attestation_carries_the_client_of_the_ui(monkeypatch):
+    monkeypatch.setenv("CLIENTS_FILE", "config/osp-b/ebw-clients.json")
+    c = _client()
+    att = c.post("/ebw/test/attestations", json={"company": "maschinenbau"}).json()["attestation"]
+    assert jwt.decode(att, options={"verify_signature": False})["client_id"] == "osp-b-ui"   # FRAMEWORK 7a
+    assert c.post("/ebw/test/attestations", json={"clientId": "osp-a-ui"}).status_code == 400
+    assert c.post("/ebw/test/attestations", json={"company": "logistik"}).status_code == 404   # no Business Wallet

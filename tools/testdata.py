@@ -30,3 +30,15 @@ def osp_company() -> dict | None:
     """Seed data of the OSP company of this installation (`ospCompanyFile` in the settings)."""
     path = settings.resolve_path(settings.get("ospCompanyFile"))
     return json.loads(path.read_text(encoding="utf-8")) if path and path.exists() else None
+
+
+@functools.lru_cache(maxsize=None)
+def applicant_companies() -> dict[str, dict]:
+    """Companies that apply, with the test IDs of FRAMEWORK 7a where it defines them."""
+    return json.loads((DIR / "applicant-companies.json").read_text(encoding="utf-8"))["companies"]
+
+
+def test_company_id(ebwoid: str | None) -> str | None:
+    """`companyId` of FRAMEWORK 7a for a company with this EBWOID, if 7a defines one."""
+    return next((c.get("companyId") for c in applicant_companies().values() if ebwoid and c.get("ebwoid") == ebwoid),
+                None)

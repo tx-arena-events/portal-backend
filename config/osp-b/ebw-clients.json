@@ -1,0 +1,10 @@
+[
+  { "clientId": "osp-b-ui", "name": "OSP B portal UI",
+    "jwksUri": "https://ui.osp-b.example.org/jwks",
+    "redirectUris": ["https://ui.osp-b.example.org/callback"],
+    "scopes": ["openid", "profile", "representation", "company", "attestation"] },
+  { "clientId": "demo-osp", "name": "Demo-OSP (test data of single modules, C5-M1 14.2)",
+    "jwksUri": "https://osp.example.org/jwks",
+    "redirectUris": ["https://osp.example.org/callback"],
+    "scopes": ["openid", "profile", "representation", "company", "attestation"] }
+]

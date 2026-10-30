@@ -1,9 +1,14 @@
 {
-  "_comment": "Companies of the verification attestations (C5-M1 14.5). Used by the attestation signer.",
+  "_comment": "Companies that apply (FRAMEWORK 7a). `companyId` is the test ID of FRAMEWORK 7a; the stand-in of C1-M2 assigns it at the first application of the company. Companies with `ebwoid` have a Business Wallet; the attestation signer uses them (C5-M1 14.5).",
   "companies": {
-    "maschinenbau": { "legalName": "Beispiel Maschinenbau GmbH", "ebwoid": "EBWOID-DE-0000000001", "euid": "DEXX001T.HRB100001", "vatId": "DE123456789",
+    "maschinenbau": { "companyId": "c0000001-0000-4000-8000-000000000001", "legalName": "Beispiel Maschinenbau GmbH", "ebwoid": "EBWOID-DE-0000000001", "euid": "DEXX001T.HRB100001", "vatId": "DE123456789",
                       "address": { "street_address": "Musterstraße 1", "postal_code": "70569", "locality": "Stuttgart", "country": "DE" } },
-    "werkzeugbau": { "legalName": "Beispiel Werkzeugbau GmbH", "ebwoid": "EBWOID-DE-0000000003", "euid": "DEXX001T.HRB100003", "vatId": "DE300000003",
+    "logistik": { "_comment": "without Business Wallet: path DOCUMENTS (FRAMEWORK 5.2); address and VAT ID as in C3-M1 14 (A2); no demo scenario",
+                  "companyId": "c0000002-0000-4000-8000-000000000002", "legalName": "Beispiel Logistik GmbH", "verification": "DOCUMENTS",
+                  "identifiers": [ { "type": "COMMERCIAL_REG_NUMBER", "value": "HRB 200002" }, { "type": "VAT_ID", "value": "DE987654321" } ],
+                  "address": { "street_address": "Hafenstraße 5", "postal_code": "68159", "locality": "Mannheim", "region": "BW", "country": "DE" } },
+    "werkzeugbau": { "_comment": "scaffold-only, not in FRAMEWORK 7a: applicant at OSP B in scenario 4; gets a new companyId",
+                     "legalName": "Beispiel Werkzeugbau GmbH", "ebwoid": "EBWOID-DE-0000000003", "euid": "DEXX001T.HRB100003", "vatId": "DE300000003",
                      "address": { "street_address": "Werkstraße 3", "postal_code": "20095", "locality": "Hamburg", "country": "DE" } }
   }
 }

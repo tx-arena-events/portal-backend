@@ -4,7 +4,7 @@
   "ospCompanyId": "33333333-3333-4333-8333-333333333333",
   "dataspace": { "memberOf": "Catena-X", "name": "Catena-X" },
   "masterDataFile": null,
-  "issuerMode": "CSP",
+  "moduleConfigFile": "module-config.json",
   "ospCompanyFile": "../../testdata/osp-b-company.json",
   "testPersonsFile": "../../testdata/persons-osp-b.json"
 }

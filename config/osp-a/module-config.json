@@ -1,0 +1,7 @@
+{
+  "_comment": "Configuration variables of the modules (section 4 of each spec) for this installation. Set as defaults at start-up; the process environment wins. CSP addresses and keys come from demo.py. Empty ISSUER_ROUTES = route STUB of C4-M1 (hackathon, OP-53).",
+  "ATTESTATION_CLIENT_IDS": "osp-a-ui",
+  "CLIENTS_FILE": "config/osp-a/ebw-clients.json",
+  "ISSUER_MODE": "OWN",
+  "ISSUER_ROUTES": ""
+}

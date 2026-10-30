@@ -2,11 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """Stand-in of C4-M1 Credentials: `issue-credentials`, status reports of issuers, credential queries.
 
-Routes (C4-M1 11.5, 11.6), chosen by `issuerMode` in the settings (`ISSUER_MODE` overrides):
-- `OWN`: route `STUB`, credentials are issued at once.
-- `CSP`: issuer of the CSP at `CSP_ISSUER_URL`: register the holder, set the grants with
-  `callbackUrl` = `{BASE_URL}/api/c4-m1/issuer-callbacks/{kind}`, request the credentials in the
-  holder's wallet (holder access from C4-M2); the CSP reports to `/issuer-callbacks/{kind}`.
+Route as in C4-M1 6.3, from `ISSUER_MODE` (`module-config.json` of the installation):
+- `STUB` (11.6), credentials are issued at once: `OWN` with empty `ISSUER_ROUTES`, `CSP` with empty
+  `CSP_ISSUER_URL`, or a wallet of provider `STUB`. At the hackathon OSP A and OSP B both run on
+  this route (OP-53).
+- `CSP_ISSUER` (11.5), `CSP` with `CSP_ISSUER_URL` and a wallet with `HOLDER_REQUESTS`: register
+  the holder, set the grants with `callbackUrl` = `{BASE_URL}/api/c4-m1/issuer-callbacks/{kind}`,
+  request the credentials in the holder's wallet (holder access from C4-M2); the CSP reports to
+  `/issuer-callbacks/{kind}`. Target for the Community Days, not used at the hackathon (OP-53).
+- `OWN` with `ISSUER_ROUTES`: the routes of an own issuer are not in the stand-in (409 `no-issuer-route`).
 """
 from __future__ import annotations
 
@@ -28,8 +32,23 @@ def reset() -> None:
     credentials.clear()
 
 
-def _mode() -> str:
-    return os.environ.get("ISSUER_MODE") or settings.get("issuerMode", "OWN")
+def _route(cid: str) -> tuple[str, dict | None]:
+    """C4-M1 6.3; returns the route and, for `CSP_ISSUER`, the wallet."""
+    if os.environ.get("ISSUER_MODE", "OWN") != "CSP":
+        if os.environ.get("ISSUER_ROUTES"):
+            raise Problem(MODULE, 409, "no-issuer-route", detail="stand-in: only the routes STUB and CSP_ISSUER",
+                          retryable=False)
+        return "STUB", None
+    if not os.environ.get("CSP_ISSUER_URL"):
+        return "STUB", None
+    wallet = neighbours.get_json(MODULE, "c4-m2", f"/internal/wallets/{cid}")
+    if not wallet:
+        raise Problem(MODULE, 409, "invalid-state", detail="no dataspace wallet", retryable=False)
+    if wallet.get("provider") == "STUB":
+        return "STUB", None
+    if wallet.get("issuanceMode") != "HOLDER_REQUESTS":
+        raise Problem(MODULE, 409, "no-issuer-route", retryable=False)
+    return "CSP_ISSUER", wallet
 
 
 def _all_issued(cid: str) -> None:
@@ -60,15 +79,15 @@ def issue(body: dict = Body(...), _: dict = standin.perm(MODULE, "POST", "/steps
     creds = credentials.setdefault(cid, {})
     if creds and all(c["status"] == "ISSUED" for c in creds.values()):
         return standin.step_reply(body, {"credentialTypes": sorted(creds)})
-    if _mode() != "CSP":
+    route, wallet = _route(cid)
+    if route == "STUB":
         for t in TYPES:
             creds[t] = {"credentialType": t, "status": "ISSUED", "bpn": bpn, "route": "STUB"}
         _all_issued(cid)
         return standin.step_reply(body, state="RUNNING")
-    wallet = neighbours.get_json(MODULE, "c4-m2", f"/internal/wallets/{cid}")
     access = neighbours.get_json(MODULE, "c4-m2", f"/internal/wallets/{cid}/holder-access")
-    if not wallet or not access:
-        raise Problem(MODULE, 409, "invalid-state", detail="no dataspace wallet", retryable=False)
+    if not access:
+        raise Problem(MODULE, 409, "invalid-state", detail="no holder access", retryable=False)
     for t in TYPES:
         creds[t] = {"credentialType": t, "status": "PENDING", "bpn": bpn, "route": "CSP_ISSUER"}
     _csp("PUT", f"/holders/{bpn}", {"did": wallet["did"]})

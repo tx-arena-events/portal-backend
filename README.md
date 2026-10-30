@@ -45,8 +45,8 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 | `modules/<module>/` | one folder per module of the spec; `c12_m1` is Process Orchestration (provided), all others are stand-ins |
 | `scaffold/` | the installation app (`create_app`) and the module registry |
 | `tools/` | test tools: Portal IAM (`test_iam`), shared CSP stand-in (`csp_standin`, own process), EBW-Connector double for attestations (`ebw_signer`), provider system double (`provider_double`), keys |
-| `config/osp-a`, `config/osp-b` | installation settings of OSP A and OSP B (FRAMEWORK 4.8) |
-| `testdata/` | one test data package for all modules: OSP companies with all roles, one catalogue of terms with one ID per version, test persons in one state each, companies at the CSP |
+| `config/osp-a`, `config/osp-b` | per installation: settings (`installation.json`, FRAMEWORK 4.8), configuration variables of the modules (`module-config.json`, e.g. `ATTESTATION_CLIENT_IDS`, `ISSUER_MODE`; the process environment wins), clients at the EBW-Connector (`ebw-clients.json`, C5-M1 6.8) |
+| `testdata/` | one test data package for all modules, IDs as in FRAMEWORK 7a (see [Test data](#test-data-framework-7a)) |
 | `demo.py` | acceptance demo, HTTP only, with content checks |
 | `tests/` | tests of every part, including scenarios 1 to 3 in one process |
 
@@ -81,6 +81,38 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 5. `uv run pytest -q && uv run python demo.py` before every merge. `GET /scaffold/modules` shows
    which modules are stand-ins.
 
+## Test data (FRAMEWORK 7a)
+
+The test IDs, test persons and the start state of a hackathon installation come from
+[FRAMEWORK 7a](https://github.com/tx-arena-events/portal-backend-spec/blob/main/FRAMEWORK.md#7a-common-test-ids);
+the files under `testdata/` follow it, and entries that 7a does not define say
+"scaffold-only, not in FRAMEWORK 7a" in `_comment`.
+
+- **Start state:** C3-M1 holds only the company of the OSP. Erika, Max, Hans and Lieschen have accounts
+  without a company, Otto (`OSP Admin`) and Rolf (`OSP Reviewer`) are OSP staff without a company
+  (`testdata/persons-osp-a.json`). Scenario 1 binds Erika as `Company Admin`.
+- **Companies:** Beispiel Maschinenbau GmbH (with Business Wallet) gets `c0000001-0000-4000-8000-000000000001`
+  and the BPN `BPNLIUK2REMLK3F4` in scenario 1; Beispiel Logistik GmbH (`c0000002-…`, without Business
+  Wallet, `COMMERCIAL_REG_NUMBER` `HRB 200002`) is in `testdata/applicant-companies.json` for the path with
+  supporting documents, without a demo scenario.
+- **Client of the UI at the EBW-Connector:** `osp-a-ui` and `osp-b-ui`, each registered in
+  `config/osp-*/ebw-clients.json` and allowed in `ATTESTATION_CLIENT_IDS`. The verification attestation
+  carries it as `client_id`; C1-M2 refuses an attestation for another client (`demo-osp`).
+- **Scaffold-only:** Pia Provider (`Company Admin` of the OSP company, app provider in scenario 3), and for
+  OSP B, for which 7a defines nothing, Gerd Beispiel, Rita Zweit, Beispiel Werkzeugbau GmbH and the OSP B
+  company `33333333-…`.
+
+## Credentials at the hackathon (OP-53)
+
+At the hackathon no real credentials are issued: OSP A and OSP B both run on the route `STUB` of C4-M1
+(C4-M1 11.6, 14). OSP A has `ISSUER_MODE` `OWN` with empty `ISSUER_ROUTES`, OSP B `ISSUER_MODE` `CSP`
+with empty `CSP_ISSUER_URL` (`config/osp-*/module-config.json`). OSP B keeps the dataspace wallet of the CSP.
+
+The path through the issuer of the CSP (route `CSP_ISSUER`, C4-M1 11.5) stays available for the demo at
+the Community Days and is **not used at the hackathon (OP-53)**: `uv run python demo.py --csp-issuer`
+points `CSP_ISSUER_URL` of OSP B to the issuer API of the CSP stand-in, and scenario 4 then checks the
+credentials in the CSP wallet and the callbacks of the CSP issuer.
+
 ## Process Orchestration (C12-M1)
 
 Runs every flow of `flows.yaml` of the spec (`FLOWS_FILE` replaces it). At start-up it checks the
@@ -105,9 +137,11 @@ These points are not (yet) fixed by the spec; the scaffold decides as follows:
    test endpoints `/admin/...` are not in the spec.
 5. **Terms:** one catalogue (`testdata/agreements.json`) maps `agreementKey` + `version` (C1-M2) to
    `agreementId` (C3-M1).
-6. **Test persons:** Erika Mustermann starts without a company (she onboards her company in
-   scenario 1), although C2-M5 14.2 lists her as bound. Pia Provider (Company Admin of the OSP
-   company), Gerd Beispiel and Rita Zweit (OSP B) and the OSP B company `33333333-…` are additions.
+6. **Test persons and company IDs:** as in FRAMEWORK 7a (above). C1-M2 7.2 generates the `companyId`;
+   the stand-in of C1-M2 takes the 7a ID for Beispiel Maschinenbau GmbH, so that the IDs of 7a appear
+   in the flows. `demo.py` does not depend on it. The app provider of scenario 3 is Pia, not Otto:
+   Otto, bound to the OSP company as in C2-M2 7.20, would approve his own offer (C8-M1 6.2, 403
+   `own-offer`; C8-M1 open question 5).
 7. **Stand-ins of C1-M2, C3-M1 and C3-M2** read and pass on the formats each spec defines for its
    own module; C3-M1 maps the C1-M2 application as C3-M1 11.1 describes.
 

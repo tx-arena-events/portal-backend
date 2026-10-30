@@ -6,6 +6,7 @@
     uv run python demo.py --scenarios 1,2,3
     uv run python demo.py --serve         # only start the processes and keep them running
     uv run python demo.py --no-start      # against already running processes
+    uv run python demo.py --csp-issuer    # OSP B with the issuer of the CSP (Community Days, not the hackathon)
 
 Every check looks at content, not only at status codes: the address that arrived at the CSP, the
 DID in the directory, the credentials, the client ID and technical user in the provider callback.
@@ -14,6 +15,9 @@ A failed check prints the step trace of the process with `lastError`. Exit code 
 Processes: CSP stand-in `http://localhost:8100`, OSP A `http://localhost:8000`, OSP B
 `http://localhost:8001` (ports via `DEMO_CSP_PORT`, `DEMO_OSP_A_PORT`, `DEMO_OSP_B_PORT`).
 Keys and the trust list are generated under `runtime/` at each start.
+
+Credentials: OSP A and OSP B run on the route `STUB` of C4-M1 (hackathon, OP-53). `--csp-issuer`
+points `CSP_ISSUER_URL` of OSP B to the issuer API of the CSP stand-in (route `CSP_ISSUER`).
 """
 from __future__ import annotations
 
@@ -47,6 +51,7 @@ class Target:
     results: dict = field(default_factory=dict)
     current: str = ""
     quiet: bool = False
+    csp_issuer: bool = False   # OSP B issues through the CSP issuer instead of the stand-in STUB
 
     # ------------------------------------------------------------ output
     def log(self, line: str) -> None:
@@ -105,17 +110,26 @@ class Target:
 
 
 # ============================================================================ scenario 1
-def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, company: str, osp_id: str) -> bool:
-    """FRAMEWORK 5.2 with the Business Wallet; returns True when the company is ACTIVE."""
+def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, company: str, osp_id: str,
+               ui_client: str) -> bool:
+    """FRAMEWORK 5.2 with the Business Wallet; returns True when the company is ACTIVE.
+    `ui_client` is the client of the installation's UI at the EBW-Connector (FRAMEWORK 7a)."""
     tok = t.token(base, applicant)
     perms = t.claims(base, applicant)["resource_access"]["portal-core"]["roles"]
     t.check("applicant signs in (Applicant, register_company)", "register_company" in perms)
-    att = t.call("POST", f"{base}/ebw/test/attestations", json={"company": company}).json()["attestation"]
-    body = {"kind": "ONBOARDING", "verification": "EBW", "attestation": att, "companyRoles": ["ACTIVE_PARTICIPANT"],
-            "companyData": {"identifiers": [{"type": "VAT_ID", "value": "DE123456789" if company == "maschinenbau"
-                                             else "DE300000003"}]}}
-    r = t.call("POST", f"{base}/api/c1-m2/applications", tok, json=body)
-    if not t.check("C1-M2 creates the application (attestation of the EBW-Connector double)", r.status_code == 201,
+
+    def application(client: str) -> dict:
+        att = t.call("POST", f"{base}/ebw/test/attestations", json={"company": company, "clientId": client})
+        return {"kind": "ONBOARDING", "verification": "EBW", "attestation": att.json()["attestation"],
+                "companyRoles": ["ACTIVE_PARTICIPANT"],
+                "companyData": {"identifiers": [{"type": "VAT_ID", "value": "DE123456789" if company == "maschinenbau"
+                                                 else "DE300000003"}]}}
+    r = t.call("POST", f"{base}/api/c1-m2/applications", tok, json=application("demo-osp"))
+    t.check(f"C1-M2 refuses an attestation for another client (ATTESTATION_CLIENT_IDS = {ui_client})",
+            r.status_code == 400 and r.json().get("reason") == "client", f"{r.status_code} {r.text[:200]}")
+    r = t.call("POST", f"{base}/api/c1-m2/applications", tok, json=application(ui_client))
+    if not t.check(f"C1-M2 creates the application (attestation for {ui_client} from the EBW-Connector double)",
+                   r.status_code == 201,
                    f"{r.status_code} {r.text[:200]}"):
         return False
     app = r.json()
@@ -148,6 +162,8 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
     t.check("C3-M1: company ACTIVE with BPN and company role ACTIVE_PARTICIPANT",
             c.get("status") == "ACTIVE" and c.get("bpn") and "ACTIVE_PARTICIPANT" in c.get("companyRoles", []),
             json.dumps({k: c.get(k) for k in ("status", "bpn", "companyRoles")}))
+    t.note(f"companyId {cid}, BPN {c.get('bpn')}"
+           + (" (test IDs of FRAMEWORK 7a)" if company == "maschinenbau" else " (no test IDs in FRAMEWORK 7a)"))
     row = next((x for x in t.call("GET", f"{t.csp}/admin/companies").json() if x["bpn"] == c.get("bpn")), {})
     wallet_did = t.step_result(base, admin, p, "create-wallet").get("result", {}).get("did")
     t.check("CSP: BPN registered, home OSP = this OSP, membership active, DID in the directory = wallet DID",
@@ -174,7 +190,7 @@ def onboarding(t: Target, base: str, applicant: str, reviewer: str, admin: str, 
 
 def scenario_1(t: Target) -> None:
     t.scenario("Scenario 1 - onboarding at OSP A (FRAMEWORK 5.2)")
-    onboarding(t, t.osp_a, "erika", "rolf", "otto", "maschinenbau", OSP_A_ID)
+    onboarding(t, t.osp_a, "erika", "rolf", "otto", "maschinenbau", OSP_A_ID, "osp-a-ui")
 
 
 # ============================================================================ scenario 2
@@ -259,19 +275,26 @@ def scenario_3(t: Target) -> None:
 
 # ============================================================================ scenario 4
 def scenario_4(t: Target) -> None:
-    t.scenario("Scenario 4 - OSP B as a second installation, issuer and wallet of the CSP")
+    issuer = "issuer of the CSP" if t.csp_issuer else "credentials from the stand-in STUB (OP-53)"
+    t.scenario(f"Scenario 4 - OSP B as a second installation, wallet of the CSP, {issuer}")
     if not t.check("OSP B installation is running", bool(t.osp_b)):
         return
-    if not onboarding(t, t.osp_b, "gerd", "rita", "rita", "werkzeugbau", OSP_B_ID):
+    # Gerd and Rita: scaffold-only test persons, FRAMEWORK 7a has none for OSP B
+    if not onboarding(t, t.osp_b, "gerd", "rita", "rita", "werkzeugbau", OSP_B_ID, "osp-b-ui"):
         return
     bpn = t.ctx.get("werkzeugbau.bpn")
     wallets = t.call("GET", f"{t.csp}/admin/wallets").json()
     w = next((x for x in wallets if x["bpn"] == bpn), {})
-    t.check("CSP wallet: dataspace wallet of the company holds the BPN and membership credentials",
-            sorted(c["type"] for c in w.get("credentials", [])) == ["bpn", "membership"], json.dumps(w)[:300])
     cbs = [c for c in t.call("GET", f"{t.csp}/admin/callbacks").json() if c["body"].get("bpn") == bpn]
-    t.check("CSP issuer called back to C4-M1 of OSP B (status 200)", cbs and all(c["status"] == 200 for c in cbs),
-            json.dumps(cbs)[:300])
+    if t.csp_issuer:
+        t.check("CSP wallet: dataspace wallet of the company holds the BPN and membership credentials",
+                sorted(c["type"] for c in w.get("credentials", [])) == ["bpn", "membership"], json.dumps(w)[:300])
+        t.check("CSP issuer called back to C4-M1 of OSP B (status 200)", cbs and all(c["status"] == 200 for c in cbs),
+                json.dumps(cbs)[:300])
+    else:
+        t.check("CSP wallet: dataspace wallet of the company exists at the CSP", bool(w), json.dumps(wallets)[:300])
+        t.check("route STUB: no credential in the CSP wallet and no callback of the CSP issuer (OP-53)",
+                not w.get("credentials") and not cbs, json.dumps({"wallet": w, "callbacks": cbs})[:300])
     a = t.call("GET", f"{t.osp_b}/api/c3-m1/osp/companies/{t.ctx['maschinenbau.companyId']}", t.token(t.osp_b, "rita")) \
         if t.ctx.get("maschinenbau.companyId") else None
     t.check("installations are separate: OSP B does not know the company of OSP A", a is None or a.status_code == 404)
@@ -310,7 +333,7 @@ def _wait(url: str, timeout: float = 30) -> bool:
     return False
 
 
-def start_processes(with_b: bool) -> tuple[Target, list[subprocess.Popen]]:
+def start_processes(with_b: bool, csp_issuer: bool = False) -> tuple[Target, list[subprocess.Popen]]:
     rt = ROOT / "runtime"
     rt.mkdir(exist_ok=True)
     ports = {k: int(os.environ.get(f"DEMO_{k}_PORT", v)) for k, v in (("CSP", 8100), ("OSP_A", 8000), ("OSP_B", 8001))}
@@ -335,8 +358,8 @@ def start_processes(with_b: bool) -> tuple[Target, list[subprocess.Popen]]:
     if with_b:
         envs.append(("osp-b", ports["OSP_B"], "scaffold.app:create_app", True,
                      {**common, "SETTINGS_FILE": str(ROOT / "config/osp-b/installation.json"), "BASE_URL": b,
-                      "OSP_SIGNING_KEY_FILE": str(rt / "osp-b-key.json"), "CSP_ISSUER_URL": f"{csp}/issuer/v1",
-                      "CSP_WALLET_URL": f"{csp}/wallet/v1"}))
+                      "OSP_SIGNING_KEY_FILE": str(rt / "osp-b-key.json"), "CSP_WALLET_URL": f"{csp}/wallet/v1",
+                      **({"CSP_ISSUER_URL": f"{csp}/issuer/v1"} if csp_issuer else {})}))
     procs = []
     for name, port, target, factory, env in envs:
         cmd = [sys.executable, "-m", "uvicorn", target, "--port", str(port), "--log-level", "warning"]
@@ -347,7 +370,7 @@ def start_processes(with_b: bool) -> tuple[Target, list[subprocess.Popen]]:
         if not _wait(f"{url}/health"):
             stop(procs)
             raise SystemExit(f"{url} did not start; see runtime/*.log")
-    return Target(osp_a=a, csp=csp, osp_b=b if with_b else None), procs
+    return Target(osp_a=a, csp=csp, osp_b=b if with_b else None, csp_issuer=csp_issuer), procs
 
 
 def stop(procs: list[subprocess.Popen]) -> None:
@@ -365,11 +388,13 @@ def main() -> int:
     ap.add_argument("--scenarios", default="1,2,3,4")
     ap.add_argument("--no-start", action="store_true", help="use running processes (DEMO_*_URL or default ports)")
     ap.add_argument("--serve", action="store_true", help="only start CSP stand-in, OSP A and OSP B and keep them running")
+    ap.add_argument("--csp-issuer", action="store_true",
+                    help="OSP B issues through the issuer of the CSP stand-in (Community Days; not used at the hackathon, OP-53)")
     args = ap.parse_args()
     which = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     if args.serve:
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-        t, procs = start_processes(with_b=True)
+        t, procs = start_processes(with_b=True, csp_issuer=args.csp_issuer)
         print(f"CSP stand-in {t.csp}, OSP A {t.osp_a}/docs, OSP B {t.osp_b}/docs - Ctrl-C stops them", flush=True)
         try:
             while all(p.poll() is None for p in procs):
@@ -382,9 +407,9 @@ def main() -> int:
     if args.no_start:
         t, procs = Target(os.environ.get("DEMO_OSP_A_URL", "http://localhost:8000"),
                           os.environ.get("DEMO_CSP_URL", "http://localhost:8100"),
-                          os.environ.get("DEMO_OSP_B_URL")), []
+                          os.environ.get("DEMO_OSP_B_URL"), csp_issuer=args.csp_issuer), []
     else:
-        t, procs = start_processes(with_b="4" in which)
+        t, procs = start_processes(with_b="4" in which, csp_issuer=args.csp_issuer)
     try:
         ok = run(t, which)
     finally:
