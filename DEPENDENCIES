@@ -27,3 +27,5 @@ pypi/pypi/-/starlette/1.10.0, BSD-3-Clause, restricted, to be checked with the E
 pypi/pypi/-/typing-extensions/4.16.0, PSF-2.0, restricted, to be checked with the Eclipse Dash license tool
 pypi/pypi/-/typing-inspection/0.4.4, MIT, restricted, to be checked with the Eclipse Dash license tool
 pypi/pypi/-/uvicorn/0.54.0, BSD-3-Clause, restricted, to be checked with the Eclipse Dash license tool
+quay.io/keycloak/keycloak/26.8.1, Apache-2.0, restricted, to be checked with the Eclipse Dash license tool
+docker.io/library/python/3.13-alpine, PSF-2.0, restricted, to be checked with the Eclipse Dash license tool

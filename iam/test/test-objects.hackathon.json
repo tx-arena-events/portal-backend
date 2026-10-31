@@ -1,0 +1,15 @@
+{
+  "_comment": "Variant hackathon: OSP A and OSP B in one Keycloak. The persons and their start state come from testdata/ (FRAMEWORK 7a).",
+  "installations": [
+    {
+      "values": { "IAM_REALM": "CX-Central", "EBW_CONNECTOR_CLIENT_ID": "portal-iam", "PORTAL_UI_URL": "http://localhost:3000" },
+      "personsFile": "testdata/persons-osp-a.json"
+    },
+    {
+      "values": { "IAM_REALM": "CX-Central-B", "EBW_CONNECTOR_CLIENT_ID": "portal-iam-b", "PORTAL_UI_URL": "http://localhost:3001" },
+      "personsFile": "testdata/persons-osp-b.json"
+    }
+  ],
+  "standInExtras": false,
+  "cspJwksFromStandIn": true
+}

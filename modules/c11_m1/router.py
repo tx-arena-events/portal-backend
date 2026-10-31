@@ -20,7 +20,7 @@ from typing import Annotated
 from fastapi import Header, Request
 
 from portal_common import sse, standin
-from tools import test_iam
+from tools import iam_backend
 
 STANDIN = True
 MODULE = "c11-m1"
@@ -63,10 +63,8 @@ def on_event(event: dict) -> None:
     elif t == "ApplicationCompleted" and event.get("applicationId") in applicants:
         _add(applicants[event["applicationId"]], "APPLICATION_COMPLETED", event, applicationId=event["applicationId"])
     elif t == "ProcessStepFailed":
-        iam = test_iam.iam()
-        for uid, u in list(iam.users.items()):
-            if "OSP Admin" in u["roles"]:
-                _add(uid, "PROCESS_STEP_FAILED", event, processId=event["processId"], stepKey=event.get("stepKey"))
+        for uid in iam_backend.backend(MODULE).users_with_portal_role("OSP Admin"):
+            _add(uid, "PROCESS_STEP_FAILED", event, processId=event["processId"], stepKey=event.get("stepKey"))
     elif t == "ProcessStepRetriggered":
         _close(lambda n: n["type"] == "PROCESS_STEP_FAILED" and n["content"] == {
             "processId": event["processId"], "stepKey": event.get("stepKey")})

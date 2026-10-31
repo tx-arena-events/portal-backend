@@ -6,5 +6,6 @@
   "masterDataFile": "../master-data.json",
   "moduleConfigFile": "module-config.json",
   "ospCompanyFile": "../../testdata/osp-a-company.json",
-  "testPersonsFile": "../../testdata/persons-osp-a.json"
+  "testPersonsFile": "../../testdata/persons-osp-a.json",
+  "iamRealmFile": "../../iam/test/import/hackathon/CX-Central-realm.json"
 }

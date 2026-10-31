@@ -18,7 +18,7 @@ variable names, own test data and silent errors. The rules below prevent this.
 
 1. Work only in your team's folder `modules/<id>/` (for example `modules/c3_m1/`). Outside it, you
    may only add your module tests as `tests/test_<id>_*.py` (for example `tests/test_c3_m1_steps.py`).
-2. Never change another team's module, `portal_common/`, `scaffold/`, `tools/`, `testdata/`,
+2. Never change another team's module, `portal_common/`, `scaffold/`, `tools/`, `iam/`, `testdata/`,
    `config/` or `spec/`. If something there is wrong or missing, open an issue and work with the
    current state.
 3. The spec in `spec/` is the contract. Read `spec/FRAMEWORK.md`, then the `README.md`,
@@ -111,11 +111,13 @@ Operations you have not implemented yet are added from the spec (steps answer `D
 git clone https://github.com/tx-arena-events/portal-backend-spec.git spec   # once; update: git -C spec pull --ff-only
 uv sync                       # behind a TLS proxy: UV_SYSTEM_CERTS=1 uv sync (older uv: UV_NATIVE_TLS=1)
 uv run pytest -q              # all tests
+docker compose up -d          # once: Keycloak, the test Portal IAM of C2-M5 (iam/README.md)
 uv run python demo.py         # CSP stand-in, OSP A and OSP B, scenarios 1 to 4; exit code 0 = green
 uv run python demo.py --serve # keep the processes running (OSP A :8000, OSP B :8001, Swagger at /docs)
 ```
 
-A token of a test person: `curl http://localhost:8000/auth/realms/CX-Central/test/tokens/erika`.
+A token of a test person: `uv run python iam/test/get-token.py erika`. The Portal IAM is Keycloak: teams of
+C2-M2 and C2-M3 call its Admin API with the service accounts `svc-c2-m2` and `svc-c2-m3`.
 
 ## Skills
 

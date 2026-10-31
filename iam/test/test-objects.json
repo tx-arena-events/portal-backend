@@ -1,0 +1,21 @@
+{
+  "_comment": "Variant test: one installation for the tests of C2-M5 and of single modules (C2-M5 14.2). Erika and Max are bound.",
+  "installations": [
+    {
+      "values": { "IAM_REALM": "CX-Central", "EBW_CONNECTOR_CLIENT_ID": "portal-iam", "PORTAL_UI_URL": "http://localhost:3000" },
+      "persons": [
+        { "key": "erika", "id": "5a1c0001-0000-4000-8000-000000000001", "portalRoles": ["Company Admin"],
+          "companyId": "c0000001-0000-4000-8000-000000000001", "bpn": "BPNLIUK2REMLK3F4", "appRoles": { "app-test": ["Viewer"] } },
+        { "key": "max", "id": "5a1c0002-0000-4000-8000-000000000002", "portalRoles": ["IT Admin"],
+          "companyId": "c0000001-0000-4000-8000-000000000001", "bpn": "BPNLIUK2REMLK3F4" },
+        { "key": "hans", "id": "5a1c0003-0000-4000-8000-000000000003", "portalRoles": [] },
+        { "key": "lieschen", "id": "5a1c0004-0000-4000-8000-000000000004", "portalRoles": [] },
+        { "key": "otto", "id": "5a1c0012-0000-4000-8000-000000000012", "portalRoles": ["OSP Admin"] },
+        { "key": "rolf", "id": "bbede0f3-fbc4-433b-b7ca-1982e8724912", "portalRoles": ["OSP Reviewer"] }
+      ],
+      "technicalUser": true,
+      "appTest": true
+    }
+  ],
+  "standInExtras": true
+}

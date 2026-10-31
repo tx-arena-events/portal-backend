@@ -7,8 +7,9 @@
 
 Start order: settings -> test tools (Portal IAM, EBW-Connector, provider system) -> modules
 -> Notifications and Process Orchestration last. All neighbours default to `in-process`.
-`TEST_TOOLS=false` leaves the test tools out (then `IAM_URL` and `EBW_CONNECTOR_URL` point to
-real systems).
+With `IAM_URL` the Portal IAM is that Keycloak (`iam/`), otherwise the in-memory IAM of the scaffold's
+own tests. `TEST_TOOLS=false` leaves all test tools out (then `IAM_URL` and `EBW_CONNECTOR_URL` point
+to real systems), and the realm is never reset.
 """
 from __future__ import annotations
 
@@ -19,6 +20,8 @@ import os
 from fastapi import FastAPI
 
 from portal_common import csp, events, http, problems, settings, standin, tokens
+
+from tools import iam_backend
 
 from . import registry
 
@@ -44,6 +47,9 @@ def reset_all(entries) -> None:
     tokens.reset()
     csp.reset()
     test_iam.reset()
+    if iam_backend.uses_keycloak() and os.environ.get("TEST_TOOLS", "true") == "true":
+        from tools import keycloak_admin
+        keycloak_admin.reset_realm()
     provider_double.reset()
     for e in entries:
         if e.module and hasattr(e.module, "reset"):
@@ -70,8 +76,10 @@ def create_app() -> FastAPI:
     problems.install(app)
     if os.environ.get("TEST_TOOLS", "true") == "true":
         from tools import ebw_signer, provider_double, test_iam
-        for r in (test_iam.router, ebw_signer.router, provider_double.router):
+        for r in (ebw_signer.router, provider_double.router):
             app.include_router(r)
+        if not iam_backend.uses_keycloak():
+            app.include_router(test_iam.router)
     for e in entries:
         if e.module:
             app.include_router(e.module.router)

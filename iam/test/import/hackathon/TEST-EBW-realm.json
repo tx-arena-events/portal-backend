@@ -1,0 +1,244 @@
+{
+ "realm": "TEST-EBW",
+ "enabled": true,
+ "sslRequired": "external",
+ "registrationAllowed": false,
+ "accessTokenLifespan": 300,
+ "eventsEnabled": true,
+ "eventsListeners": [
+  "jboss-logging"
+ ],
+ "enabledEventTypes": [
+  "LOGIN",
+  "LOGIN_ERROR",
+  "CODE_TO_TOKEN",
+  "CODE_TO_TOKEN_ERROR"
+ ],
+ "requiredActions": [
+  {
+   "alias": "VERIFY_PROFILE",
+   "name": "Verify Profile",
+   "providerId": "VERIFY_PROFILE",
+   "enabled": false,
+   "defaultAction": false,
+   "priority": 90,
+   "config": {}
+  }
+ ],
+ "clients": [
+  {
+   "clientId": "portal-iam",
+   "name": "Portal IAM of CX-Central",
+   "enabled": true,
+   "publicClient": false,
+   "protocol": "openid-connect",
+   "standardFlowEnabled": true,
+   "implicitFlowEnabled": false,
+   "directAccessGrantsEnabled": false,
+   "serviceAccountsEnabled": false,
+   "clientAuthenticatorType": "client-jwt",
+   "redirectUris": [
+    "http://localhost:8080/auth/realms/CX-Central/broker/ebw-connector/endpoint"
+   ],
+   "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "use.jwks.url": "true",
+    "jwks.url": "http://localhost:8080/auth/realms/CX-Central/protocol/openid-connect/certs",
+    "token.endpoint.auth.signing.alg": "ES256"
+   },
+   "defaultClientScopes": [
+    "profile"
+   ],
+   "optionalClientScopes": [],
+   "protocolMappers": []
+  },
+  {
+   "clientId": "portal-iam-b",
+   "name": "Portal IAM of CX-Central-B",
+   "enabled": true,
+   "publicClient": false,
+   "protocol": "openid-connect",
+   "standardFlowEnabled": true,
+   "implicitFlowEnabled": false,
+   "directAccessGrantsEnabled": false,
+   "serviceAccountsEnabled": false,
+   "clientAuthenticatorType": "client-jwt",
+   "redirectUris": [
+    "http://localhost:8080/auth/realms/CX-Central-B/broker/ebw-connector/endpoint"
+   ],
+   "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "use.jwks.url": "true",
+    "jwks.url": "http://localhost:8080/auth/realms/CX-Central-B/protocol/openid-connect/certs",
+    "token.endpoint.auth.signing.alg": "ES256"
+   },
+   "defaultClientScopes": [
+    "profile"
+   ],
+   "optionalClientScopes": [],
+   "protocolMappers": []
+  }
+ ],
+ "users": [
+  {
+   "id": "e7cdf249-5d94-5827-8b0b-ba7b20501c68",
+   "username": "nina",
+   "firstName": "Nina",
+   "lastName": "Neu",
+   "email": "nina@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "60edf5b5-525b-5ea7-a7b1-3b58dad26887",
+   "username": "erika",
+   "firstName": "Erika",
+   "lastName": "Mustermann",
+   "email": "erika@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "a6938523-21d2-5d87-8cc5-c64699b8cf8f",
+   "username": "max",
+   "firstName": "Max",
+   "lastName": "Mustermann",
+   "email": "max@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "26e4436a-0efb-59b1-896a-c2153267daef",
+   "username": "hans",
+   "firstName": "Hans",
+   "lastName": "Beispiel",
+   "email": "hans@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "9af2058d-01c9-5f40-a270-1f4e7570ffbf",
+   "username": "lieschen",
+   "firstName": "Lieschen",
+   "lastName": "Müller",
+   "email": "lieschen@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "402c87a6-eff6-5e11-be24-1b5f92fb44fb",
+   "username": "otto",
+   "firstName": "Otto",
+   "lastName": "Normalverbraucher",
+   "email": "otto@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "60ee48b7-175d-5cf9-b773-8565d79dc2d8",
+   "username": "rolf",
+   "firstName": "Rolf",
+   "lastName": "Prüfer",
+   "email": "rolf@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "b74e46d3-17f0-57f5-9758-9bf89f0ded14",
+   "username": "pia",
+   "firstName": "Pia",
+   "lastName": "Provider",
+   "email": "pia@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "044b01f5-1e8b-5141-a58b-100cc509504b",
+   "username": "gerd",
+   "firstName": "Gerd",
+   "lastName": "Beispiel",
+   "email": "gerd@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  },
+  {
+   "id": "1f041e77-9f7c-510a-8467-c900e6e43a27",
+   "username": "rita",
+   "firstName": "Rita",
+   "lastName": "Zweit",
+   "email": "rita@stand-in.example.org",
+   "emailVerified": true,
+   "enabled": true,
+   "credentials": [
+    {
+     "type": "password",
+     "value": "test-only-password",
+     "temporary": false
+    }
+   ]
+  }
+ ]
+}

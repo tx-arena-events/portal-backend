@@ -8,7 +8,7 @@ import datetime as dt
 
 from portal_common import events, standin
 from portal_common.problems import Problem
-from tools import test_iam
+from tools import iam_backend
 
 MODULE = "c2-m2"
 templates: dict[str, dict] = {}          # appId -> template
@@ -21,8 +21,8 @@ def reset() -> None:
 
 
 def assign_company_admin(input: dict) -> dict:
-    iam, uid = test_iam.iam(), input.get("applicantSub")
-    if uid not in iam.users:
+    iam, uid = iam_backend.backend(MODULE), input.get("applicantSub")
+    if not uid or iam.find(uid) is None:
         raise Problem(MODULE, 404, "not-found", detail="account unknown", retryable=False)
     person = iam.person(uid)
     if person["companyId"] not in (None, input.get("companyId")):
@@ -110,8 +110,7 @@ def list_company_user_refs(*, companyId: str, portalRole: str | None = None, sta
     wanted = [status] if isinstance(status, str) else status or ["ACTIVE"]
     if "ACTIVE" not in wanted:
         return []
-    return [{"userId": uid, "status": "ACTIVE"} for uid, u in test_iam.iam().users.items()
-            if u["companyId"] == companyId and (not portalRole or portalRole in u["roles"])]
+    return [{"userId": uid, "status": "ACTIVE"} for uid in iam_backend.backend(MODULE).users_of_company(companyId, portalRole)]
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

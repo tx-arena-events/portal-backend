@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Contributors to the Eclipse Foundation
 # SPDX-License-Identifier: Apache-2.0
-"""In-memory Portal IAM of one installation for tests (stand-in for the Keycloak realm of C2-M5).
+"""In-memory Portal IAM of one installation, only for the tests of the scaffold itself.
+
+The test IAM of the hackathon is the Keycloak in `iam/` (C2-M5 14).
 
 - Permissions and portal roles are read from the spec (C2-M5 README 6.2, 6.3); technical user
   roles from 6.4. No hand-made copy that could drift.
@@ -135,6 +137,13 @@ class IAM:
     def bind(self, uid: str, company_id: str | None, bpn: str | None) -> None:
         with self.lock:
             self.users[uid].update(companyId=company_id, bpn=bpn)
+
+    def users_with_portal_role(self, role: str) -> list[str]:
+        return [uid for uid, u in list(self.users.items()) if role in u["roles"]]
+
+    def users_of_company(self, company_id: str, portal_role: str | None = None) -> list[str]:
+        return [uid for uid, u in list(self.users.items())
+                if u["companyId"] == company_id and (not portal_role or portal_role in u["roles"])]
 
     def person(self, uid: str) -> dict:
         u = self.users[uid]

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from portal_common import events, standin, tokens
 from portal_common.problems import Problem
-from tools import test_iam
+from tools import iam_backend
 
 MODULE = "c2-m3"
 technical_users: dict[str, dict] = {}
@@ -24,7 +24,7 @@ def create_for_subscription(input: dict) -> dict:
         roles = [r["name"] if isinstance(r, dict) else r for r in input.get("roles") or []]
         client_id = f"sa-{tid[:8]}"
         try:
-            test_iam.iam().create_technical_user(client_id, input.get("customerCompanyId"), None, roles)
+            iam_backend.backend(MODULE).create_technical_user(client_id, input.get("customerCompanyId"), None, roles)
         except ValueError as e:
             raise Problem(MODULE, 400, "role-not-assignable", detail=str(e), retryable=False) from e
         technical_users[tid] = {"id": tid, "clientId": client_id, "name": input.get("name"), "roles": roles,
@@ -60,7 +60,7 @@ def rotate_subscription_credentials(*, id: str, offerSubscriptionId: str | None 
     tu = _get(id)
     if offerSubscriptionId is not None and tu["offerSubscriptionId"] != offerSubscriptionId:
         raise Problem(MODULE, 404, "not-found")
-    return {"iamClientId": tu["clientId"], "secret": test_iam.iam().rotate_secret(tu["clientId"]),
+    return {"iamClientId": tu["clientId"], "secret": iam_backend.backend(MODULE).rotate_secret(tu["clientId"]),
             "tokenUrl": f"{tokens.iam_url()}/realms/{tokens.realm()}/protocol/openid-connect/token"}
 
 
@@ -70,7 +70,7 @@ def list_technical_roles(*, lang: str | None = None, **_other) -> list[dict]:
     wallet = {"Identity Wallet Management"}
     provider_only = {"BPDM Pool Consumer", "BPDM Sharing Output Consumer", "BPDM Sharing Input Manager"}
     return [{"name": r, "description": None, "grantsWalletAccess": r in wallet, "providerOnly": r in provider_only}
-            for r in sorted(test_iam.iam().technical_roles)]
+            for r in sorted(iam_backend.backend(MODULE).technical_roles)]
 
 
 __getattr__ = standin.missing_interface(MODULE)   # steps and queries not implemented yet: stand-in

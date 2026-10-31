@@ -13,12 +13,13 @@ shows at once whether the flows still run end to end.
 
 ## Quickstart (about 10 minutes)
 
-Prerequisites: [uv](https://docs.astral.sh/uv/) and git.
+Prerequisites: [uv](https://docs.astral.sh/uv/), git and Docker with Compose.
 
 ```bash
 git clone https://github.com/tx-arena-events/portal-backend-spec.git spec   # read-only, not committed
 uv sync                       # Python 3.12 and the dependencies (behind a TLS proxy: UV_NATIVE_TLS=1 uv sync)
 uv run pytest -q              # all tests, about 5 seconds
+docker compose up -d          # Keycloak, the test Portal IAM of C2-M5; ready after about a minute
 uv run python demo.py         # starts the CSP stand-in, OSP A and OSP B, runs scenarios 1 to 4
 ```
 
@@ -29,13 +30,15 @@ Keep the three processes running for your own calls (UI, curl, Swagger at `/docs
 
 ```bash
 uv run python demo.py --serve           # CSP stand-in :8100, OSP A :8000, OSP B :8001; Ctrl-C stops them
-curl http://localhost:8000/auth/realms/CX-Central/test/tokens/erika   # token of a test person
+uv run python iam/test/get-token.py erika                             # token of a test person
 uv run python demo.py --no-start --scenarios 1,2,3                    # in a second terminal
 ```
 
 `start_processes()` in `demo.py` shows the environment of each process (keys, trust list, CSP
 addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no `CSP_URL`):
-`SETTINGS_FILE=config/osp-a/installation.json uv run uvicorn --factory scaffold.app:create_app --port 8000`.
+`IAM_URL=http://localhost:8080/auth SETTINGS_FILE=config/osp-a/installation.json uv run uvicorn --factory scaffold.app:create_app --port 8000`.
+Without Docker, `uv run python demo.py --small-iam` runs on the in-memory IAM of the scaffold's own tests;
+there is no sign-in through the browser and no Admin API, so C2-M2 and C2-M3 cannot be built against it.
 
 ## What is inside
 
@@ -44,7 +47,8 @@ addresses). One installation alone, with the built-in CSP stand-in of C3-M2 (no 
 | `portal_common/` | shared building blocks: token validation (`tokens`), `service_token(module)`, Problem Details (`problems`), installation settings (`settings`), queries to neighbours with the error rule (`neighbours`), event relay (`events`), access to the CSP with `private_key_jwt` (`csp`), spec access (`spec`), spec-driven stand-ins (`standin`) |
 | `modules/<module>/` | one folder per module of the spec (`interface.py`, `router.py`, see [Module structure](#module-structure-and-calls-between-modules)); `c12_m1` is Process Orchestration (provided), all others are stand-ins |
 | `scaffold/` | the installation app (`create_app`) and the module registry |
-| `tools/` | test tools: Portal IAM (`test_iam`), shared CSP stand-in (`csp_standin`, own process), EBW-Connector double for attestations (`ebw_signer`), provider system double (`provider_double`), keys |
+| `iam/` | the test Portal IAM: Keycloak with the realm of C2-M5, test persons and a stand-in for the EBW-Connector (see [iam/README.md](iam/README.md)) |
+| `tools/` | test tools: access to the Keycloak test installation (`keycloak_login`, `keycloak_admin`, `iam_backend`), in-memory IAM of the scaffold's own tests (`test_iam`), shared CSP stand-in (`csp_standin`, own process), EBW-Connector double for attestations (`ebw_signer`), provider system double (`provider_double`), keys |
 | `config/osp-a`, `config/osp-b` | per installation: settings (`installation.json`, FRAMEWORK 4.8), configuration variables of the modules (`module-config.json`, e.g. `ATTESTATION_CLIENT_IDS`, `ISSUER_MODE`; the process environment wins), clients at the EBW-Connector (`ebw-clients.json`, C5-M1 6.8) |
 | `testdata/` | one test data package for all modules, IDs as in FRAMEWORK 7a (see [Test data](#test-data-framework-7a)) |
 | `demo.py` | acceptance demo, HTTP only, with content checks |
@@ -146,6 +150,15 @@ the files under `testdata/` follow it, and entries that 7a does not define say
   OSP B, for which 7a defines nothing, Gerd Beispiel, Rita Zweit, Beispiel Werkzeugbau GmbH and the OSP B
   company `33333333-…`.
 
+## Test Portal IAM (C2-M5)
+
+The Portal IAM is the Keycloak in `iam/`, started with `docker compose up -d`: one Keycloak with the realm
+`CX-Central` for OSP A and `CX-Central-B` for OSP B. With `IAM_URL` set, an installation validates tokens
+against it, and the stand-ins of C2-M2, C2-M3 and C11-M1 use it through `tools/iam_backend`. Teams of C2-M2
+and C2-M3 call its Admin API as their specs describe. Every start of an installation and `/scaffold/reset`
+restore the start state of its realm. `TEST_TOOLS=false` leaves all test tools out and never touches the realm.
+Without `IAM_URL`, an installation uses the in-memory IAM of `tools/test_iam.py`; `pytest` runs on it.
+
 ## Credentials at the hackathon (OP-53)
 
 At the hackathon no real credentials are issued: OSP A and OSP B both run on the route `STUB` of C4-M1
@@ -173,7 +186,7 @@ staff and `GET /api/c12-m1/applications/{applicationId}/events` for the applican
 `GET /api/c11-m1/notifications/events`. Try it:
 
 ```bash
-TOKEN=$(curl -s localhost:8000/auth/realms/CX-Central/test/tokens/erika | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+TOKEN=$(uv run python iam/test/get-token.py erika)
 curl -N -H "Authorization: Bearer $TOKEN" localhost:8000/api/c11-m1/notifications/events
 ```
 
@@ -207,8 +220,6 @@ These points are not (yet) fixed by the spec; the scaffold decides as follows:
 ## Not included yet
 
 - Persistence: all modules and Process Orchestration keep their data in memory.
-- A Keycloak test installation (C2-M5 14): the test IAM covers tokens, JWKS, client credentials and
-  `private_key_jwt`, not the browser flows.
 - The stand-ins cover the hackathon paths (scenarios 1 to 4); other operations answer 501.
 - Retries of callbacks from the CSP stand-in.
 

@@ -1,0 +1,28 @@
+# Copyright (c) 2026 Contributors to the Eclipse Foundation
+# SPDX-License-Identifier: Apache-2.0
+# Test Portal IAM (C2-M5 14). Test values only, not for operation.
+# IAM_VARIANT=hackathon (default): OSP A and OSP B in their start state.
+# IAM_VARIANT=test: one installation with bound persons, for the tests of single modules.
+services:
+  iam:
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.8.1}
+    command: ["start-dev", "--import-realm", "--http-relative-path=/auth"]
+    environment:
+      KC_HOSTNAME: http://localhost:8080/auth
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin-test-only
+    ports:
+      - "8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # the CSP stand-in of demo.py runs on the host
+    volumes:
+      - ./iam/test/import/${IAM_VARIANT:-hackathon}:/opt/keycloak/data/import:ro
+    depends_on:
+      - iam-test-jwks
+
+  iam-test-jwks:
+    image: python:3.13-alpine
+    command: ["python", "-m", "http.server", "8000", "--directory", "/jwks"]
+    volumes:
+      - ./iam/test/jwks:/jwks:ro

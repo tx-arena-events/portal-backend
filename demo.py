@@ -7,6 +7,7 @@
     uv run python demo.py --serve         # only start the processes and keep them running
     uv run python demo.py --no-start      # against already running processes
     uv run python demo.py --csp-issuer    # OSP B with the issuer of the CSP (Community Days, not the hackathon)
+    uv run python demo.py --small-iam     # without Docker: the in-memory IAM of the scaffold's own tests
 
 Every check looks at content, not only at status codes: the address that arrived at the CSP, the
 DID in the directory, the credentials, the client ID and technical user in the provider callback.
@@ -15,6 +16,9 @@ A failed check prints the step trace of the process with `lastError`. Exit code 
 Processes: CSP stand-in `http://localhost:8100`, OSP A `http://localhost:8000`, OSP B
 `http://localhost:8001` (ports via `DEMO_CSP_PORT`, `DEMO_OSP_A_PORT`, `DEMO_OSP_B_PORT`).
 Keys and the trust list are generated under `runtime/` at each start.
+
+Portal IAM: the Keycloak of `docker compose up -d` (`IAM_URL`, default http://localhost:8080/auth), with the
+realm `CX-Central` for OSP A and `CX-Central-B` for OSP B. Every start restores the start state of the realms.
 
 Credentials: OSP A and OSP B run on the route `STUB` of C4-M1 (hackathon, OP-53). `--csp-issuer`
 points `CSP_ISSUER_URL` of OSP B to the issuer API of the CSP stand-in (route `CSP_ISSUER`).
@@ -35,9 +39,11 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
 from portal_common import http  # noqa: E402
+from tools import keycloak_login  # noqa: E402
 from tools.keys import ec_jwk  # noqa: E402
 
 REALM = "/auth/realms/CX-Central"
+REALM_A, REALM_B = "CX-Central", "CX-Central-B"
 OSP_A_ID, OSP_B_ID = "22222222-2222-4222-8222-222222222222", "99a5685c-7397-402c-88de-b1b3a939ecc9"
 OSP_COMPANY = "11111111-1111-4111-8111-111111111111"
 
@@ -51,6 +57,8 @@ class Target:
     results: dict = field(default_factory=dict)
     current: str = ""
     quiet: bool = False
+    iam: str | None = None     # address of the Keycloak; None = in-memory IAM of the installation
+    staff_tokens: dict = field(default_factory=dict)
     csp_issuer: bool = False   # OSP B issues through the CSP issuer instead of the stand-in STUB
 
     # ------------------------------------------------------------ output
@@ -77,22 +85,33 @@ class Target:
         return http.request(method, url, timeout=30, headers=headers, **kw)
 
     def token(self, base: str, person: str) -> str:
+        if self.iam:
+            realm = REALM_B if base == self.osp_b else REALM_A
+            return keycloak_login.person_token(person, realm, base=self.iam)["access_token"]
         return self.call("GET", f"{base}{REALM}/test/tokens/{person}").json()["access_token"]
 
+    def staff_token(self, base: str, person: str) -> str:
+        """Token of OSP staff for polling; their rights do not change during a scenario."""
+        cached = self.staff_tokens.get((base, person))
+        if cached and cached[1] > time.time():
+            return cached[0]
+        token = self.token(base, person)
+        self.staff_tokens[(base, person)] = (token, time.time() + 120)
+        return token
+
     def claims(self, base: str, person: str) -> dict:
-        r = self.call("GET", f"{base}{REALM}/test/tokens/{person}").json()
         import jwt
-        return jwt.decode(r["access_token"], options={"verify_signature": False})
+        return jwt.decode(self.token(base, person), options={"verify_signature": False})
 
     def process(self, base: str, admin: str, flow: str, subject: str, until: tuple[str, ...], timeout: float = 30):
         """Waits until the process of `flow` for `subject` has one of the states in `until`."""
         end, p = time.time() + timeout, None
         while time.time() < end:
-            r = self.call("GET", f"{base}/api/c12-m1/processes", self.token(base, admin),
+            r = self.call("GET", f"{base}/api/c12-m1/processes", self.staff_token(base, admin),
                           params={"flowKey": flow, "subjectId": subject})
             items = r.json().get("items", []) if r.status_code == 200 else []
             if items:
-                p = self.call("GET", f"{base}/api/c12-m1/processes/{items[0]['id']}", self.token(base, admin)).json()
+                p = self.call("GET", f"{base}/api/c12-m1/processes/{items[0]['id']}", self.staff_token(base, admin)).json()
                 if p["status"] in until:
                     return p
             time.sleep(0.2)
@@ -106,7 +125,7 @@ class Target:
         return f"{p['status']}: {out}" + (f" | lastError {errors}" if errors else "")
 
     def step_result(self, base: str, admin: str, p: dict, key: str) -> dict:
-        return self.call("GET", f"{base}/api/c12-m1/processes/{p['id']}/steps/{key}", self.token(base, admin)).json()
+        return self.call("GET", f"{base}/api/c12-m1/processes/{p['id']}/steps/{key}", self.staff_token(base, admin)).json()
 
 
 # ============================================================================ scenario 1
@@ -341,7 +360,17 @@ def _wait(url: str, timeout: float = 30) -> bool:
     return False
 
 
-def start_processes(with_b: bool, csp_issuer: bool = False) -> tuple[Target, list[subprocess.Popen]]:
+def keycloak_address() -> str:
+    """Address of the Keycloak test installation; stops with a hint if it does not answer."""
+    iam = keycloak_login.iam_url()
+    if not _wait(f"{iam}/realms/{REALM_A}/.well-known/openid-configuration", timeout=5):
+        raise SystemExit(f"Keycloak does not answer at {iam}. Start it with `docker compose up -d` "
+                         "(about a minute), or run without it with --small-iam.")
+    return iam
+
+
+def start_processes(with_b: bool, csp_issuer: bool = False, small_iam: bool = False) -> tuple[Target, list[subprocess.Popen]]:
+    iam = None if small_iam else keycloak_address()
     rt = ROOT / "runtime"
     rt.mkdir(exist_ok=True)
     ports = {k: int(os.environ.get(f"DEMO_{k}_PORT", v)) for k, v in (("CSP", 8100), ("OSP_A", 8000), ("OSP_B", 8001))}
@@ -349,24 +378,29 @@ def start_processes(with_b: bool, csp_issuer: bool = False) -> tuple[Target, lis
     keys = {OSP_A_ID: ec_jwk("osp-a-1"), OSP_B_ID: ec_jwk("osp-b-1")}
     (rt / "osp-a-key.json").write_text(json.dumps(keys[OSP_A_ID][0]))
     (rt / "osp-b-key.json").write_text(json.dumps(keys[OSP_B_ID][0]))
+    iam_a = f"{iam}/realms/{REALM_A}" if iam else f"{a}{REALM}"
+    iam_b = f"{iam}/realms/{REALM_B}" if iam else f"{b}{REALM}"
     trust = {OSP_A_ID: {"name": "OSP A", "installationUrl": a, "jwk": keys[OSP_A_ID][1],
-                        "iamTokenUrl": f"{a}{REALM}/protocol/openid-connect/token"},
+                        "iamTokenUrl": f"{iam_a}/protocol/openid-connect/token"},
              OSP_B_ID: {"name": "OSP B", "installationUrl": b, "jwk": keys[OSP_B_ID][1],
-                        "iamTokenUrl": f"{b}{REALM}/protocol/openid-connect/token"}}
+                        "iamTokenUrl": f"{iam_b}/protocol/openid-connect/token"}}
     (rt / "csp-trust.json").write_text(json.dumps(trust, indent=2))
     common = {**os.environ, "PYTHONWARNINGS": "ignore", "CSP_URL": f"{csp}/v1", "CSP_TOKEN_URL": f"{csp}/oauth/token",
               "CSP_JWKS_URL": f"{csp}/.well-known/jwks.json", "RETRY_BASE_SECONDS": "1", "RETRY_MAX_SECONDS": "4",
               "WORKER_POLL_SECONDS": "0.5", "AWAIT_TIMEOUT": "PT60S"}
+    common.pop("IAM_URL", None)
+    iam_env = (lambda realm: {"IAM_URL": iam, "IAM_REALM": realm}) if iam else (lambda realm: {})
     envs = [("csp", ports["CSP"], "tools.csp_standin.app:app", False,
              {**common, "CSP_TRUST_FILE": str(rt / "csp-trust.json"), "CSP_PUBLIC_URL": csp,
               "CSP_SIGNING_KEY_FILE": str(rt / "csp-key.json")}),
             ("osp-a", ports["OSP_A"], "scaffold.app:create_app", True,
              {**common, "SETTINGS_FILE": str(ROOT / "config/osp-a/installation.json"), "BASE_URL": a,
-              "OSP_SIGNING_KEY_FILE": str(rt / "osp-a-key.json")})]
+              "OSP_SIGNING_KEY_FILE": str(rt / "osp-a-key.json"), **iam_env(REALM_A)})]
     if with_b:
         envs.append(("osp-b", ports["OSP_B"], "scaffold.app:create_app", True,
                      {**common, "SETTINGS_FILE": str(ROOT / "config/osp-b/installation.json"), "BASE_URL": b,
                       "OSP_SIGNING_KEY_FILE": str(rt / "osp-b-key.json"), "CSP_WALLET_URL": f"{csp}/wallet/v1",
+                      **iam_env(REALM_B),
                       **({"CSP_ISSUER_URL": f"{csp}/issuer/v1"} if csp_issuer else {})}))
     procs = []
     for name, port, target, factory, env in envs:
@@ -378,7 +412,7 @@ def start_processes(with_b: bool, csp_issuer: bool = False) -> tuple[Target, lis
         if not _wait(f"{url}/health"):
             stop(procs)
             raise SystemExit(f"{url} did not start; see runtime/*.log")
-    return Target(osp_a=a, csp=csp, osp_b=b if with_b else None, csp_issuer=csp_issuer), procs
+    return Target(osp_a=a, csp=csp, osp_b=b if with_b else None, csp_issuer=csp_issuer, iam=iam), procs
 
 
 def stop(procs: list[subprocess.Popen]) -> None:
@@ -398,11 +432,12 @@ def main() -> int:
     ap.add_argument("--serve", action="store_true", help="only start CSP stand-in, OSP A and OSP B and keep them running")
     ap.add_argument("--csp-issuer", action="store_true",
                     help="OSP B issues through the issuer of the CSP stand-in (Community Days; not used at the hackathon, OP-53)")
+    ap.add_argument("--small-iam", action="store_true", help="without Docker: the in-memory IAM of the scaffold's own tests")
     args = ap.parse_args()
     which = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     if args.serve:
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-        t, procs = start_processes(with_b=True, csp_issuer=args.csp_issuer)
+        t, procs = start_processes(with_b=True, csp_issuer=args.csp_issuer, small_iam=args.small_iam)
         print(f"CSP stand-in {t.csp}, OSP A {t.osp_a}/docs, OSP B {t.osp_b}/docs - Ctrl-C stops them", flush=True)
         try:
             while all(p.poll() is None for p in procs):
@@ -415,9 +450,10 @@ def main() -> int:
     if args.no_start:
         t, procs = Target(os.environ.get("DEMO_OSP_A_URL", "http://localhost:8000"),
                           os.environ.get("DEMO_CSP_URL", "http://localhost:8100"),
-                          os.environ.get("DEMO_OSP_B_URL"), csp_issuer=args.csp_issuer), []
+                          os.environ.get("DEMO_OSP_B_URL"), csp_issuer=args.csp_issuer,
+                          iam=None if args.small_iam else keycloak_address()), []
     else:
-        t, procs = start_processes(with_b="4" in which, csp_issuer=args.csp_issuer)
+        t, procs = start_processes(with_b="4" in which, csp_issuer=args.csp_issuer, small_iam=args.small_iam)
     try:
         ok = run(t, which)
     finally:
