@@ -15,7 +15,14 @@ shows at once whether the flows still run end to end.
 
 Prerequisites: [uv](https://docs.astral.sh/uv/), git and Docker with Compose.
 
+Clone this repository first, then clone
+[portal-backend-spec](https://github.com/tx-arena-events/portal-backend-spec) into the folder
+`spec/` inside it (the scaffold reads the spec from `portal-backend/spec/`; `.gitignore` keeps it
+out of commits). Run all later commands from the `portal-backend` folder.
+
 ```bash
+git clone https://github.com/tx-arena-events/portal-backend.git
+cd portal-backend
 git clone https://github.com/tx-arena-events/portal-backend-spec.git spec   # read-only, not committed
 uv sync                       # Python 3.12 and the dependencies (behind a TLS proxy: UV_NATIVE_TLS=1 uv sync)
 uv run pytest -q              # all tests, about 5 seconds
